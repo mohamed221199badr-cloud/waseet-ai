@@ -384,8 +384,9 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
     prior = _history(link) if llm.open_mode() else []
     reply = _handle(db, link, text, prior)
     if llm.open_mode():
-        _HISTORY[str(link.id)] = (_HISTORY.get(str(link.id), [])
-                                  + [(_now(), "user", text[:500]), (_now(), "assistant", reply[:500])])[-12:]
+        key = str(link.id)
+        turns = [(_now(), "user", text[:500]), (_now(), "assistant", reply[:500])]
+        _HISTORY[key] = (_HISTORY.get(key, []) + turns)[-12:]
     return reply
 
 

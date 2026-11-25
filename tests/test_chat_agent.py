@@ -264,8 +264,8 @@ def test_non_order_messages_get_natural_different_replies(db_session, linked):
 def test_greeting_in_the_middle_does_not_trap_or_corrupt_the_order(db_session, linked):
     q = say(db_session, 500, "٣ رز")
     r = say(db_session, 500, "مرحبا")
-    assert q in r and ("مثال" in r or "الأصناف" in r)          # greeting answered, question repeated
-    r = say(db_session, 500, "٢ سكر")           # customer moves on: new item added
+    assert q in r and ("مثال" in r or "الأصناف" in r)  # greeting answered, question repeated
+    r = say(db_session, 500, "٢ سكر")  # customer moves on: new item added
     assert "قصدك" in r or "2 × سكر" in r
     say(db_session, 500, "الغي")
     say(db_session, 500, "٣ سكر")

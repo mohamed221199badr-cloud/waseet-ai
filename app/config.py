@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     chat_agent_enabled: bool = True       # CHAT_AGENT_ENABLED=false -> old one-shot intake
     chat_show_prices: bool = True         # prices in the confirmation message (from DB only)
     chat_session_ttl_minutes: int = 30
-    llm_mode: str = "off"                 # off | assist | chat | open (open = free-text model replies, trial only)
+    # off | assist | chat | open. "open" shows free-text model replies unfiltered: dev/trial only,
+    # rejected at startup when APP_ENV is not "dev".
+    llm_mode: str = "off"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:1.5b"
     llm_timeout_seconds: float = 8.0
