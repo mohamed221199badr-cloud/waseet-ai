@@ -43,6 +43,7 @@ class ApiClient:
                  http: httpx.Client | None = None):
         self.base_url = (base_url or _default_url()).rstrip("/")
         self.token = token
+        self.refresh_token: str | None = None
         self._http = http or httpx.Client(timeout=15)
 
     def _req(self, method: str, path: str, **kw):
@@ -51,6 +52,20 @@ class ApiClient:
             r = self._http.request(method, self.base_url + path, headers=headers, **kw)
         except httpx.HTTPError as exc:
             raise ApiError(0, f"تعذر الاتصال بالسيرفر ({type(exc).__name__})") from None
+        if r.status_code == 401 and self.refresh_token and path != "/auth/refresh":
+            # access tokens are short-lived (Phase 1): renew once and retry
+            try:
+                data = self._http.request("POST", self.base_url + "/auth/refresh",
+                                          json={"refresh_token": self.refresh_token})
+                if data.status_code == 200:
+                    body = data.json()
+                    self.token = body["access_token"]
+                    self.refresh_token = body["refresh_token"]
+                    headers["Authorization"] = f"Bearer {self.token}"
+                    r = self._http.request(method, self.base_url + path,
+                                           headers=headers, **kw)
+            except httpx.HTTPError:
+                pass
         if r.status_code >= 400:
             raise ApiError(r.status_code, _detail(r))
         return None if r.status_code == 204 else r.json()
@@ -59,6 +74,7 @@ class ApiClient:
         data = self._req("POST", "/auth/login", json={
             "business_slug": business_slug, "email": email, "password": password})
         self.token = data["access_token"]
+        self.refresh_token = data.get("refresh_token")
 
     def me(self): return self._req("GET", "/auth/me")
     def customers(self): return self._req("GET", "/customers")
