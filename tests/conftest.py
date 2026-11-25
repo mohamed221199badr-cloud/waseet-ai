@@ -29,12 +29,13 @@ def test_password_hash() -> str:
     return _HASH
 
 
-TABLES = ["audit_events", "product_aliases", "products", "users", "businesses"]
+TABLES = ["telegram_updates", "audit_events", "product_aliases", "products", "users", "businesses"]
 
 
 @pytest.fixture(scope="session")
 def engine():
     eng = create_engine(TEST_URL)
+    os.environ["DATABASE_URL"] = TEST_URL  # alembic/env.py prefers this over the ini URL
     cfg = AlembicConfig("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", TEST_URL.replace("%", "%%"))
     alembic_command.upgrade(cfg, "head")

@@ -121,3 +121,31 @@ WASEET_PASSWORD='كلمة-سر-قوية' python -m app.create_owner --slug my-sh
 - `DELETE /api/v1/products/{id}` بقى تعطيل (`is_active=false`).
 - قياس المحرك: `python -m tests.eval.evaluate` و `python -m tests.eval.evaluate --holdout`.
 - بيانات تجريبية: `python -m app.seed` (كلمة سر الحسابات التجريبية `demo-pass-123`، غيّرها بـ `SEED_PASSWORD`).
+
+## Milestone 4: تيليجرام + شاشة الاستثناءات
+
+```bash
+pip install -r requirements.txt
+alembic upgrade head
+```
+
+**البوت:** اعمل بوت من @BotFather وحط التوكن في متغير بيئة على جهازك بس (أو في `.env` الغير مرفوع):
+
+```bash
+export TELEGRAM_BOT_TOKEN='التوكن-من-BotFather'   # متكتبوش في الكود ولا تبعته لأي حد
+python -m app.telegram.client                      # polling، من غير domain ولا webhook
+```
+
+**ربط عميل:** المالك يعمل كود من شاشة "تيليجرام" (أو `POST /api/v1/telegram/link-codes`).
+العميل يبعت للبوت `/start الكود`. الكود يشتغل مرة واحدة وينتهي بعد 24 ساعة. بعد كده أي رسالة من
+الشات ده بتتحول لمسودة طلب (`channel=telegram`) باسم العميل ده في شركته بس. `/stop` يفصل الشات.
+`GET /api/v1/telegram/links` و `DELETE /api/v1/telegram/links/{id}` للمالك.
+
+**الشاشة:**
+
+```bash
+uvicorn app.main:app &                                # الـ API
+streamlit run ui/app.py                               # الشاشة على http://localhost:8501
+```
+
+`WASEET_API_URL` (افتراضي `http://localhost:8000/api/v1`). الدخول بنفس slug/إيميل/كلمة سر المالك.

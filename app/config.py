@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     app_env: str = "dev"  # anything other than "dev" requires a real JWT_SECRET
     jwt_secret: str = "dev-only-secret-change-me-0123456789"
     jwt_expire_minutes: int = 480
+    # Milestone 4: set TELEGRAM_BOT_TOKEN in your own environment/.env. Never hardcode or commit it.
+    telegram_bot_token: str = ""
+    telegram_link_code_ttl_hours: int = 24
 
     @model_validator(mode="after")
     def _secret_must_be_real_outside_dev(self):

@@ -9,6 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -209,3 +210,59 @@ class OrderException(Base):
     decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     order: Mapped[Order] = relationship(back_populates="exceptions")
+
+
+class TelegramLinkCode(Base):
+    """One-time code the owner hands to a customer. Only its SHA-256 is stored."""
+
+    __tablename__ = "telegram_link_codes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["business_id", "customer_id"],
+            ["customers.business_id", "customers.id"],
+            ondelete="CASCADE",
+            name="fk_tglinkcode_customer_same_business",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), index=True
+    )
+    customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column()
+    used_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class TelegramLink(Base):
+    """A Telegram private chat bound to exactly one customer of exactly one business.
+    chat_id is unique across the whole system, so a chat can never reach two tenants."""
+
+    __tablename__ = "telegram_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["business_id", "customer_id"],
+            ["customers.business_id", "customers.id"],
+            ondelete="CASCADE",
+            name="fk_tglink_customer_same_business",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), index=True
+    )
+    customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class TelegramUpdate(Base):
+    """Processed Telegram update ids: a redelivered update never creates a second order."""
+
+    __tablename__ = "telegram_updates"
+
+    update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

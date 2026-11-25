@@ -12,3 +12,4 @@ ruff>=0.4
 rapidfuzz>=3.6
 PyJWT>=2.8
 bcrypt>=4.1
+streamlit>=1.40
