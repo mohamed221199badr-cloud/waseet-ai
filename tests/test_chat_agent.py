@@ -236,3 +236,13 @@ def test_web_chat_endpoint_uses_same_agent_and_is_tenant_scoped(client, shop):  
     assert bad.status_code == 404
     assert client.post("/api/v1/chat/message",
                        json={"customer_id": c["id"], "text": "x"}).status_code in (401, 403)
+
+
+def test_llm_can_never_confirm_or_cancel_an_order(db_session, linked, monkeypatch):
+    monkeypatch.setattr(settings, "llm_mode", "assist")
+    calls = _fake_ollama(monkeypatch, json.dumps({"label": "no", "choice": None}))
+    say(db_session, 500, "٣ سكر")
+    r = say(db_session, 500, "ممم مش عارف")       # not yes/no: the order must stay open
+    assert "اكتب «تمام»" in r and orders(db_session) == []
+    assert db_session.scalar(select(func.count()).select_from(ChatSession)) == 1
+    assert calls == [] or all("اختار رقم" not in str(c) for c in calls)

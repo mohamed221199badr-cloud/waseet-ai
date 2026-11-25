@@ -56,13 +56,3 @@ def suggest_product(raw_text: str, names: list[str]) -> int | None:
     except (TypeError, ValueError):
         return None
     return n - 1 if n is not None and 1 <= n <= len(names) else None
-
-
-def classify_reply(text: str, awaiting: str) -> str | None:
-    """yes | no | other, for a reply the rules could not read."""
-    out = chat_json(
-        f'العميل بيرد على سؤال ({awaiting}). صنّف ردّه: yes أو no أو other. '
-        'رد JSON {"label": "yes|no|other"}.', text,
-    )
-    label = out.get("label") if out else None
-    return label if label in ("yes", "no", "other") else None

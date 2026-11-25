@@ -317,9 +317,6 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
 
     if state == "confirming":
         label = "yes" if _is(text, YES) else "no" if _is(text, NO) else None
-        if label is None and llm.llm_enabled():
-            label = llm.classify_reply(text, "تأكيد الطلب")
-            label = label if label in ("yes", "no") else None
         if label == "yes":
             reply = _create_order(db, link, lines)
             _clear(db, session)
