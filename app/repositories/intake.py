@@ -66,8 +66,11 @@ def create_draft_from_text(
                 continue
         db.add(
             OrderException(
+                # B3: `reason` is the fixed enum; the matcher code is kept in
+                # reason_detail (unclear_item covers not_found / duplicate_product / ...).
                 business_id=business_id, order_id=order.id, raw_text=r.raw[:500],
-                reason=r.reason or "not_found", quantity=r.quantity,
+                reason="unclear_item", reason_detail=(r.reason or "not_found")[:30],
+                customer_message=text, quantity=r.quantity,
                 candidates=_candidates_json(r) if r.candidates else (
                     [{"product_id": str(r.product_id)}] if r.product_id else []
                 ),
@@ -90,6 +93,11 @@ def get_exception(
     )
 
 
-def close_exception(exc: OrderException, status: str) -> None:
+def close_exception(
+    exc: OrderException, status: str, *, resolved_by: uuid.UUID,
+    resolution_note: str | None = None,
+) -> None:
     exc.status = status
-    exc.decided_at = datetime.now(timezone.utc)
+    exc.resolved_by = resolved_by
+    exc.resolved_at = datetime.now(timezone.utc)
+    exc.resolution_note = resolution_note

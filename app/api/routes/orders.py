@@ -5,10 +5,11 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_business
+from app.api.deps import get_business, require
 from app.audit import write_audit
 from app.db import get_db
 from app.models import Business
+from app.permissions import Permission as P
 from app.repositories import customers as customers_repo
 from app.repositories import inventory
 from app.repositories import orders as repo
@@ -41,6 +42,7 @@ def _add_item_or_http(db: Session, order, item: ItemIn):
 @router.get("", response_model=list[OrderRead])
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),
+    _: None = Depends(require(P.ORDER_VIEW_ALL)),
     customer_id: uuid.UUID | None = None,
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
@@ -51,6 +53,7 @@ def list_orders(
 @router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
 def create_order(
     body: OrderCreate,
+    _: None = Depends(require(P.ORDER_CREATE_MANUAL)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -72,6 +75,7 @@ def create_order(
 @router.get("/{order_id}", response_model=OrderRead)
 def get_order(
     order_id: uuid.UUID,
+    _: None = Depends(require(P.ORDER_VIEW_ALL)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -82,6 +86,7 @@ def get_order(
 def add_item(
     order_id: uuid.UUID,
     body: ItemIn,
+    _: None = Depends(require(P.ORDER_EDIT_LINES)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -103,6 +108,7 @@ def add_item(
 def remove_item(
     order_id: uuid.UUID,
     item_id: uuid.UUID,
+    _: None = Depends(require(P.ORDER_EDIT_LINES)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -126,6 +132,7 @@ def remove_item(
 @router.post("/{order_id}/submit", response_model=OrderRead)
 def submit_order(
     order_id: uuid.UUID,
+    _: None = Depends(require(P.ORDER_CREATE_MANUAL)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -147,6 +154,7 @@ def submit_order(
 @router.post("/{order_id}/confirm", response_model=OrderRead)
 def confirm_order(
     order_id: uuid.UUID,
+    _: None = Depends(require(P.ORDER_CONFIRM)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -176,6 +184,7 @@ def confirm_order(
 def reject_order(
     order_id: uuid.UUID,
     body: RejectBody | None = None,
+    _: None = Depends(require(P.ORDER_REJECT)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -198,6 +207,7 @@ def reject_order(
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_draft(
     order_id: uuid.UUID,
+    _: None = Depends(require(P.ORDER_EDIT_LINES)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):

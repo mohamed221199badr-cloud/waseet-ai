@@ -31,7 +31,11 @@ class Business(Base):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("business_id", "email", name="uq_users_business_email"),)
+    __table_args__ = (
+        UniqueConstraint("business_id", "email", name="uq_users_business_email"),
+        # Composite uniqueness lets tenant-scoped composite FKs point at (business_id, id).
+        UniqueConstraint("business_id", "id", name="uq_users_business_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     business_id: Mapped[uuid.UUID] = mapped_column(
@@ -39,10 +43,13 @@ class User(Base):
     )
     full_name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(320))
-    # Milestone 1: single owner per business. Roles (owner/approver/staff) arrive with auth later.
+    # Phase 1: six staff roles (owner/manager/cashier/kitchen/storekeeper/delivery) plus the
+    # internal system actor. What each role may do lives in app/permissions.py only.
     role: Mapped[str] = mapped_column(String(20), default="owner")
-    # bcrypt hash (Milestone 3). NULL = this user cannot log in yet.
+    # bcrypt hash (Milestone 3). NULL = this user cannot log in yet (e.g. the system actor).
     password_hash: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    must_change_password: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     business: Mapped[Business] = relationship(back_populates="users")
@@ -114,5 +121,5 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
 
 
-# Milestone 2 tables (registered on the same Base)
-from app import models_orders  # noqa: E402,F401
+# Milestone 2+ tables (registered on the same Base)
+from app import models_menu, models_orders, models_roles  # noqa: E402,F401

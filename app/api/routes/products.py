@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_business
+from app.api.deps import get_business, require
 from app.audit import write_audit
 from app.db import get_db
 from app.models import Business
+from app.permissions import Permission as P
 from app.repositories import products as repo
 from app.schemas import AliasCreate, AliasRead, ProductCreate, ProductRead, ProductUpdate
 
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/products", tags=["products"])
 @router.get("", response_model=list[ProductRead])
 def list_products(
     is_active: bool | None = None,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ) -> list:
@@ -28,6 +30,7 @@ def list_products(
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
 def create_product(
     body: ProductCreate,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -62,6 +65,7 @@ def _get_or_404(db: Session, business_id: uuid.UUID, product_id: uuid.UUID):
 @router.get("/{product_id}", response_model=ProductRead)
 def get_product(
     product_id: uuid.UUID,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -72,6 +76,7 @@ def get_product(
 def update_product(
     product_id: uuid.UUID,
     body: ProductUpdate,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -93,6 +98,7 @@ def update_product(
 @router.delete("/{product_id}", response_model=ProductRead)
 def deactivate_product(
     product_id: uuid.UUID,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -117,6 +123,7 @@ def deactivate_product(
 @router.get("/{product_id}/aliases", response_model=list[AliasRead])
 def list_aliases(
     product_id: uuid.UUID,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -128,6 +135,7 @@ def list_aliases(
 def create_alias(
     product_id: uuid.UUID,
     body: AliasCreate,
+    _: None = Depends(require(P.MENU_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):

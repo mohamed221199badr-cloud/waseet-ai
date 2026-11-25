@@ -9,15 +9,17 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_business, get_current_user
+from app.api.deps import get_business, get_current_user, require
 from app.audit import write_audit
 from app.db import get_db
 from app.models import Business, User
+from app.permissions import Permission as P
 from app.repositories import customers as customers_repo
 from app.repositories import intake as repo
 from app.repositories import orders as orders_repo
 from app.schemas_orders import (
     CandidateRead,
+    DismissBody,
     IntakeRequest,
     IntakeResult,
     LineResult,
@@ -31,6 +33,7 @@ router = APIRouter(tags=["intake"])
 @router.post("/intake/text-order", response_model=IntakeResult, status_code=status.HTTP_201_CREATED)
 def text_to_draft_order(
     body: IntakeRequest,
+    _: None = Depends(require(P.ORDER_CREATE_MANUAL)),
     business: Business = Depends(get_business),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -91,6 +94,7 @@ def resolve_exception(
     order_id: uuid.UUID,
     exception_id: uuid.UUID,
     body: ResolveBody,
+    _: None = Depends(require(P.ORDER_EDIT_LINES)),
     business: Business = Depends(get_business),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -108,12 +112,13 @@ def resolve_exception(
     except orders_repo.DuplicateItem:
         db.rollback()
         raise HTTPException(status_code=409, detail="Product already in this order") from None
-    repo.close_exception(exc, "resolved")
+    repo.close_exception(exc, "resolved", resolved_by=user.id, resolution_note=body.note)
     write_audit(
         db, business_id=business.id, actor_id=user.id, entity="order_exception",
         entity_id=str(exc.id), action="update",
         payload={"status": "resolved", "order_id": str(order.id), "item_id": str(item.id),
-                 "product_id": str(body.product_id), "quantity": quantity},
+                 "product_id": str(body.product_id), "quantity": quantity,
+                 "note": body.note},
     )
     db.commit()
     db.refresh(order)
@@ -124,16 +129,18 @@ def resolve_exception(
 def dismiss_exception(
     order_id: uuid.UUID,
     exception_id: uuid.UUID,
+    body: DismissBody,
+    _: None = Depends(require(P.ORDER_EDIT_LINES)),
     business: Business = Depends(get_business),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     order, exc = _open_exception_or_404(db, business.id, order_id, exception_id)
-    repo.close_exception(exc, "dismissed")
+    repo.close_exception(exc, "dismissed", resolved_by=user.id, resolution_note=body.note)
     write_audit(
         db, business_id=business.id, actor_id=user.id, entity="order_exception",
         entity_id=str(exc.id), action="update",
-        payload={"status": "dismissed", "order_id": str(order.id)},
+        payload={"status": "dismissed", "order_id": str(order.id), "note": body.note},
     )
     db.commit()
     db.refresh(order)

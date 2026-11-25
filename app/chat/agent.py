@@ -346,8 +346,10 @@ def _create_order(db: Session, link: TelegramLink, lines: list[dict]) -> str:
             unresolved += 1
             cands = ln.get("candidates") or ([ln["product_id"]] if ln.get("product_id") else [])
             db.add(OrderException(
+                # B3: enum reason + the matcher/agent code kept in reason_detail
                 business_id=link.business_id, order_id=order.id, raw_text=ln["raw"][:500],
-                reason=(ln.get("reason") or "not_found")[:30], quantity=ln.get("qty"),
+                reason="unclear_item", reason_detail=(ln.get("reason") or "not_found")[:30],
+                customer_message=ln["raw"], quantity=ln.get("qty"),
                 candidates=[{"product_id": c} for c in cands]))
     db.flush()
     write_audit(db, business_id=link.business_id, entity="order", entity_id=str(order.id),

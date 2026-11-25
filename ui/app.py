@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
-from ui import api_client  # noqa: E402
+from ui import api_client, menu_page, staff_page  # noqa: E402
 
 REASONS = {
     "not_found": "المنتج مش موجود في الكتالوج",
@@ -119,9 +119,11 @@ def exception_box(o, e, products) -> None:
                 st.rerun()
             except api_client.ApiError as exc:
                 show_error(exc)
-        if b.button("تجاهل السطر", key=f"d-{e['id']}"):
+        note = st.text_input("سبب التجاهل", key=f"dn-{e['id']}",
+                             placeholder="مثال: مش سطر أوردر")
+        if b.button("تجاهل السطر", key=f"d-{e['id']}", disabled=not note.strip()):
             try:
-                c.dismiss(o["id"], e["id"])
+                c.dismiss(o["id"], e["id"], note.strip())
                 st.rerun()
             except api_client.ApiError as exc:
                 show_error(exc)
@@ -258,11 +260,18 @@ def main() -> None:
     me = st.session_state.me
     st.sidebar.write(f"**{me['business_name']}**\n\n{me['email']}")
     page = st.sidebar.radio(
-        "الصفحة", ["المسودات", "في انتظار الاعتماد", "السجل", "تيليجرام", "جرّب البوت"])
+        "الصفحة", ["المسودات", "في انتظار الاعتماد", "السجل", "تيليجرام", "جرّب البوت",
+                   "المنيو", "الموظفون"])
     if st.sidebar.button("خروج"):
         st.session_state.clear()
         st.rerun()
     try:
+        if page == "المنيو":
+            menu_page.menu_page()
+            return
+        if page == "الموظفون":
+            staff_page.staff_page()
+            return
         customers, products = lookups()
         {"المسودات": drafts_page, "في انتظار الاعتماد": pending_page,
          "السجل": history_page, "تيليجرام": telegram_page,

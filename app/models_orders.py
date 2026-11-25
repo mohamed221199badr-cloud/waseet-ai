@@ -150,6 +150,7 @@ class OrderItem(Base):
     __tablename__ = "order_items"
     __table_args__ = (
         UniqueConstraint("order_id", "product_id", name="uq_order_items_order_product"),
+        UniqueConstraint("business_id", "id", name="uq_order_items_business_id"),
         CheckConstraint("quantity > 0", name="ck_item_qty_positive"),
         ForeignKeyConstraint(
             ["business_id", "order_id"],
@@ -179,16 +180,35 @@ class OrderItem(Base):
 
 
 EXCEPTION_STATUSES = ("open", "resolved", "dismissed")
+EXCEPTION_REASONS = (
+    "price_required", "unclear_item", "special_request", "complaint", "low_confidence", "other",
+)
 
 
 class OrderException(Base):
-    """A line of order text the matcher could not safely turn into an item.
-    A draft with open exceptions cannot be submitted until each is resolved or dismissed."""
+    """A line of order text the matcher could not safely turn into an item (B3, extended
+    in Phase 1). A draft with open exceptions cannot be submitted until each is resolved
+    or dismissed. `reason` is the fixed enum; `reason_detail` keeps the original matcher
+    code (not_found, duplicate_product, ...)."""
 
     __tablename__ = "order_exceptions"
     __table_args__ = (
         CheckConstraint(
             "status in ('open','resolved','dismissed')", name="ck_order_exceptions_status"
+        ),
+        CheckConstraint(
+            "reason in ('price_required','unclear_item','special_request','complaint',"
+            "'low_confidence','other')",
+            name="ck_order_exceptions_reason",
+        ),
+        CheckConstraint(
+            "(status = 'open' and resolved_by is null and resolved_at is null) or "
+            "(status <> 'open' and resolved_by is not null and resolved_at is not null)",
+            name="ck_order_exceptions_resolution",
+        ),
+        CheckConstraint(
+            "status <> 'dismissed' or length(btrim(resolution_note, ' ')) > 0",
+            name="ck_order_exceptions_dismiss_note",
         ),
         ForeignKeyConstraint(
             ["business_id", "order_id"],
@@ -196,18 +216,34 @@ class OrderException(Base):
             ondelete="CASCADE",
             name="fk_exception_order_same_business",
         ),
+        ForeignKeyConstraint(
+            ["business_id", "order_line_id"],
+            ["order_items.business_id", "order_items.id"],
+            ondelete="SET NULL",
+            name="fk_exception_line_same_business",
+        ),
+        ForeignKeyConstraint(
+            ["business_id", "resolved_by"],
+            ["users.business_id", "users.id"],
+            name="fk_exception_resolver_same_business",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    order_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     raw_text: Mapped[str] = mapped_column(String(500))
     reason: Mapped[str] = mapped_column(String(30))
+    reason_detail: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    customer_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     quantity: Mapped[int | None] = mapped_column(nullable=True)
     candidates: Mapped[list] = mapped_column(JSONB, default=list)
     status: Mapped[str] = mapped_column(String(20), default="open")
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     order: Mapped[Order] = relationship(back_populates="exceptions")
 

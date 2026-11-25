@@ -32,13 +32,13 @@ def test_client_full_flow(client, shop, api):  # noqa: F811
     order = make_draft(client, shop, "٣ سكر\n٣ رز\n٥ بسكويت")
     drafts = api.orders("draft")
     assert len(drafts) == 1 and len(drafts[0]["exceptions"]) == 2
-    amb = next(e for e in drafts[0]["exceptions"] if e["reason"] == "ambiguous")
-    other = next(e for e in drafts[0]["exceptions"] if e["reason"] == "not_found")
+    amb = next(e for e in drafts[0]["exceptions"] if e["reason_detail"] == "ambiguous")
+    other = next(e for e in drafts[0]["exceptions"] if e["reason_detail"] == "not_found")
     with pytest.raises(api_client.ApiError) as ei:
         api.submit(order["id"])
     assert ei.value.status == 409
     api.resolve(order["id"], amb["id"], shop["p"]["R5"]["id"])
-    api.dismiss(order["id"], other["id"])
+    api.dismiss(order["id"], other["id"], "مش صنف")
     assert api.submit(order["id"])["status"] == "pending"
     assert api.confirm(order["id"])["status"] == "confirmed"
     assert api.orders("confirmed")[0]["id"] == order["id"]
@@ -97,6 +97,11 @@ def test_screen_dismiss_then_submit_then_confirm(client, shop, monkeypatch):  # 
     patch_client(monkeypatch, client)
     order = make_draft(client, shop, "٣ سكر\n٥ بسكويت")
     at = login(AppTest.from_file(APP, default_timeout=30).run())
+    # the dismiss button stays disabled until the mandatory reason is typed (B3)
+    btn = [b for b in at.button if b.label == "تجاهل السطر"][0]
+    assert btn.disabled
+    [t for t in at.text_input if t.key.startswith("dn-")][0].set_value("مش صنف عندنا")
+    at.run()
     [b for b in at.button if b.label == "تجاهل السطر"][0].click()
     at.run()
     assert not at.exception, at.exception

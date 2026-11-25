@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_business
+from app.api.deps import get_business, require
 from app.audit import write_audit
 from app.db import get_db
 from app.models import Business
+from app.permissions import Permission as P
 from app.repositories import customers as repo
 from app.repositories import products as products_repo
 from app.schemas_orders import (
@@ -31,13 +32,17 @@ def _customer_or_404(db: Session, business_id: uuid.UUID, customer_id: uuid.UUID
 
 
 @router.get("", response_model=list[CustomerRead])
-def list_customers(business: Business = Depends(get_business), db: Session = Depends(get_db)):
+def list_customers(
+    _: None = Depends(require(P.CRM_VIEW)),
+    business: Business = Depends(get_business), db: Session = Depends(get_db)
+):
     return repo.list_customers(db, business.id)
 
 
 @router.post("", response_model=CustomerRead, status_code=status.HTTP_201_CREATED)
 def create_customer(
     body: CustomerCreate,
+    _: None = Depends(require(P.CRM_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -59,6 +64,7 @@ def create_customer(
 @router.get("/{customer_id}", response_model=CustomerRead)
 def get_customer(
     customer_id: uuid.UUID,
+    _: None = Depends(require(P.CRM_VIEW)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -69,6 +75,7 @@ def get_customer(
 def update_customer(
     customer_id: uuid.UUID,
     body: CustomerUpdate,
+    _: None = Depends(require(P.CRM_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -92,6 +99,7 @@ def update_customer(
 @router.get("/{customer_id}/prices", response_model=list[CustomerPriceRead])
 def list_prices(
     customer_id: uuid.UUID,
+    _: None = Depends(require(P.CRM_VIEW)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -104,6 +112,7 @@ def set_price(
     customer_id: uuid.UUID,
     product_id: uuid.UUID,
     body: CustomerPriceSet,
+    _: None = Depends(require(P.CRM_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -125,6 +134,7 @@ def set_price(
 def delete_price(
     customer_id: uuid.UUID,
     product_id: uuid.UUID,
+    _: None = Depends(require(P.CRM_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):

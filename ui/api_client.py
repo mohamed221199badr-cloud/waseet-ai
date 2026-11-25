@@ -43,6 +43,7 @@ class ApiClient:
                  http: httpx.Client | None = None):
         self.base_url = (base_url or _default_url()).rstrip("/")
         self.token = token
+        self.refresh_token: str | None = None
         self._http = http or httpx.Client(timeout=15)
 
     def _req(self, method: str, path: str, **kw):
@@ -51,6 +52,20 @@ class ApiClient:
             r = self._http.request(method, self.base_url + path, headers=headers, **kw)
         except httpx.HTTPError as exc:
             raise ApiError(0, f"تعذر الاتصال بالسيرفر ({type(exc).__name__})") from None
+        if r.status_code == 401 and self.refresh_token and path != "/auth/refresh":
+            # access tokens are short-lived (Phase 1): renew once and retry
+            try:
+                data = self._http.request("POST", self.base_url + "/auth/refresh",
+                                          json={"refresh_token": self.refresh_token})
+                if data.status_code == 200:
+                    body = data.json()
+                    self.token = body["access_token"]
+                    self.refresh_token = body["refresh_token"]
+                    headers["Authorization"] = f"Bearer {self.token}"
+                    r = self._http.request(method, self.base_url + path,
+                                           headers=headers, **kw)
+            except httpx.HTTPError:
+                pass
         if r.status_code >= 400:
             raise ApiError(r.status_code, _detail(r))
         return None if r.status_code == 204 else r.json()
@@ -59,6 +74,7 @@ class ApiClient:
         data = self._req("POST", "/auth/login", json={
             "business_slug": business_slug, "email": email, "password": password})
         self.token = data["access_token"]
+        self.refresh_token = data.get("refresh_token")
 
     def me(self): return self._req("GET", "/auth/me")
     def customers(self): return self._req("GET", "/customers")
@@ -74,7 +90,9 @@ class ApiClient:
         return self._req("POST", f"/orders/{oid}/exceptions/{eid}/resolve",
                          json={"product_id": product_id, "quantity": quantity})
 
-    def dismiss(self, oid, eid): return self._req("POST", f"/orders/{oid}/exceptions/{eid}/dismiss")
+    def dismiss(self, oid, eid, note: str):
+        return self._req("POST", f"/orders/{oid}/exceptions/{eid}/dismiss",
+                         json={"note": note})
 
     def new_link_code(self, customer_id):
         return self._req("POST", "/telegram/link-codes", json={"customer_id": customer_id})
@@ -86,3 +104,25 @@ class ApiClient:
 
     def chat_reset(self, customer_id):
         return self._req("POST", "/chat/reset", json={"customer_id": customer_id, "text": "x"})
+
+    # Phase 1: menu + staff
+    def menu_items(self): return self._req("GET", "/menu/items")
+
+    def create_menu_item(self, body: dict): return self._req("POST", "/menu/items", json=body)
+
+    def set_availability(self, item_id, is_available: bool):
+        return self._req("POST", f"/menu/items/{item_id}/availability",
+                         json={"is_available": is_available})
+
+    def update_variant(self, item_id, variant_id, **changes):
+        return self._req("PATCH", f"/menu/items/{item_id}/variants/{variant_id}",
+                         json=changes)
+
+    def import_menu(self, csv_text: str, dry_run: bool = True):
+        return self._req("POST", "/menu/import",
+                         json={"csv_text": csv_text, "dry_run": dry_run})
+
+    def menu_diff(self): return self._req("GET", "/menu/diff-report")
+    def staff(self): return self._req("GET", "/staff")
+    def create_staff(self, body: dict): return self._req("POST", "/staff", json=body)
+    def deactivate_staff(self, staff_id): return self._req("POST", f"/staff/{staff_id}/deactivate")
