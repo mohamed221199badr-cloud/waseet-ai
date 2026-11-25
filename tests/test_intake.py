@@ -45,10 +45,11 @@ def test_text_becomes_draft_with_items_and_exceptions(client, shop):
     assert order["source_text"].startswith("٣ سكر")
     assert {i["quantity"] for i in order["items"]} == {3, 2}
     assert Decimal(order["total"]) == Decimal("3") * Decimal("28.00") + 2 * Decimal("10.00")
-    reasons = {e["raw_text"]: e["reason"] for e in order["exceptions"]}
-    assert reasons["5 بسكويت"] == "not_found"
-    assert reasons["3 رز"] == "ambiguous"
-    ambiguous = next(e for e in order["exceptions"] if e["reason"] == "ambiguous")
+    reasons = {e["raw_text"]: (e["reason"], e["reason_detail"]) for e in order["exceptions"]}
+    # B3: the enum says WHAT kind of problem; the matcher code lives in reason_detail
+    assert reasons["5 بسكويت"] == ("unclear_item", "not_found")
+    assert reasons["3 رز"] == ("unclear_item", "ambiguous")
+    ambiguous = next(e for e in order["exceptions"] if e["reason_detail"] == "ambiguous")
     assert {c["sku"] for c in ambiguous["candidates"]} == {"R1", "R5"}
 
 
@@ -85,7 +86,8 @@ def test_requires_login_and_is_tenant_isolated(client, shop):
     cb = client.post("/api/v1/customers", headers=hb, json={"name": "عميل ب"}).json()
     r = client.post(INTAKE, headers=hb, json={"text": "2 سكر", "customer_id": cb["id"]}).json()
     assert r["matched_count"] == 0 and r["order"]["items"] == []
-    assert r["order"]["exceptions"][0]["reason"] == "not_found"
+    assert r["order"]["exceptions"][0]["reason"] == "unclear_item"
+    assert r["order"]["exceptions"][0]["reason_detail"] == "not_found"
 
 
 def test_no_lines_is_422_and_creates_nothing(client, shop):
@@ -115,11 +117,18 @@ def test_submit_blocked_until_exceptions_resolved_or_dismissed(client, shop):
     assert client.post(url, headers=h, json={"product_id": p["SA"]["id"]}).status_code == 422
     assert client.post(url, headers=h, json={"product_id": p["SA"]["id"],
                                               "quantity": 6}).status_code == 200
-    client.post(f"/api/v1/orders/{oid}/exceptions/{by_raw['4 بسكويت']['id']}/dismiss",
-                headers=h)
+    r = client.post(f"/api/v1/orders/{oid}/exceptions/{by_raw['4 بسكويت']['id']}/dismiss",
+                    headers=h, json={"note": "مش صنف عندنا"})
+    dismissed = next(e for e in r.json()["exceptions"] if e["raw_text"] == "4 بسكويت")
+    assert r.status_code == 200
+    assert dismissed["resolution_note"] == "مش صنف عندنا"
+    assert dismissed["resolved_by"] and dismissed["resolved_at"]
+    # a dismissal without a note is refused (the audit trail must say why)
+    assert client.post(f"/api/v1/orders/{oid}/exceptions/{by_raw['4 بسكويت']['id']}/dismiss",
+                       headers=h, json={"note": " "}).status_code == 422
     # closed exceptions cannot be closed twice
     assert client.post(f"/api/v1/orders/{oid}/exceptions/{by_raw['4 بسكويت']['id']}/dismiss",
-                       headers=h).status_code == 409
+                       headers=h, json={"note": "مرة تانية"}).status_code == 409
     sub = client.post(f"/api/v1/orders/{oid}/submit", headers=h)
     assert sub.status_code == 200 and sub.json()["status"] == "pending"
     conf = client.post(f"/api/v1/orders/{oid}/confirm", headers=h)
@@ -134,7 +143,7 @@ def test_cross_tenant_exception_resolution_is_404(client, shop):
                                              "customer_id": shop["c"]["id"]}).json()["order"]
     hb = auth_headers(shop["ids"]["b"])
     url = f"/api/v1/orders/{d['id']}/exceptions/{d['exceptions'][0]['id']}/dismiss"
-    assert client.post(url, headers=hb).status_code == 404
+    assert client.post(url, headers=hb, json={"note": "x"}).status_code == 404
 
 
 def test_inactive_products_are_not_matched(client, shop):

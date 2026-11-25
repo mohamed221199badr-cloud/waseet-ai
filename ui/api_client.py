@@ -74,7 +74,9 @@ class ApiClient:
         return self._req("POST", f"/orders/{oid}/exceptions/{eid}/resolve",
                          json={"product_id": product_id, "quantity": quantity})
 
-    def dismiss(self, oid, eid): return self._req("POST", f"/orders/{oid}/exceptions/{eid}/dismiss")
+    def dismiss(self, oid, eid, note: str):
+        return self._req("POST", f"/orders/{oid}/exceptions/{eid}/dismiss",
+                         json={"note": note})
 
     def new_link_code(self, customer_id):
         return self._req("POST", "/telegram/link-codes", json={"customer_id": customer_id})

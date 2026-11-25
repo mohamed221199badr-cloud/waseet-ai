@@ -34,7 +34,7 @@ def verify_password(password: str, password_hash: str | None) -> bool:
 
 
 def create_access_token(user_id: uuid.UUID, business_id: uuid.UUID) -> tuple[str, int]:
-    expires = timedelta(minutes=settings.jwt_expire_minutes)
+    expires = timedelta(minutes=settings.access_token_expire_minutes)
     now = datetime.now(timezone.utc)
     payload = {"sub": str(user_id), "bid": str(business_id), "iat": now, "exp": now + expires}
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM), int(

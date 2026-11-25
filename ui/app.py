@@ -119,9 +119,11 @@ def exception_box(o, e, products) -> None:
                 st.rerun()
             except api_client.ApiError as exc:
                 show_error(exc)
-        if b.button("تجاهل السطر", key=f"d-{e['id']}"):
+        note = st.text_input("سبب التجاهل", key=f"dn-{e['id']}",
+                             placeholder="مثال: مش سطر أوردر")
+        if b.button("تجاهل السطر", key=f"d-{e['id']}", disabled=not note.strip()):
             try:
-                c.dismiss(o["id"], e["id"])
+                c.dismiss(o["id"], e["id"], note.strip())
                 st.rerun()
             except api_client.ApiError as exc:
                 show_error(exc)

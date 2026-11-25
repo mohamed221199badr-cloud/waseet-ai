@@ -29,7 +29,13 @@ def test_password_hash() -> str:
     return _HASH
 
 
-TABLES = ["telegram_updates", "audit_events", "product_aliases", "products", "users", "businesses"]
+TABLES = [
+    "telegram_updates", "audit_events", "product_aliases", "products",
+    "login_attempts", "user_sessions", "staff_channels",
+    "price_overrides", "menu_item_aliases", "menu_item_variants", "menu_items",
+    "menu_categories", "restaurant_settings",
+    "users", "businesses",
+]
 
 
 @pytest.fixture(scope="session")

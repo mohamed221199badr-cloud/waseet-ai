@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_business, get_current_user
+from app.api.deps import get_business, get_current_user, require
 from app.audit import write_audit
 from app.db import get_db
 from app.models import Business, User
 from app.models_orders import Customer, TelegramLink
+from app.permissions import Permission as P
 from app.repositories import customers as customers_repo
 from app.schemas_telegram import LinkCodeCreate, LinkCodeRead, TelegramLinkRead
 from app.telegram.service import new_link_code
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 @router.post("/link-codes", response_model=LinkCodeRead, status_code=status.HTTP_201_CREATED)
 def create_link_code(
     body: LinkCodeCreate,
+    _: None = Depends(require(P.CRM_MANAGE)),
     business: Business = Depends(get_business),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -43,7 +45,10 @@ def create_link_code(
 
 
 @router.get("/links", response_model=list[TelegramLinkRead])
-def list_links(business: Business = Depends(get_business), db: Session = Depends(get_db)):
+def list_links(
+    _: None = Depends(require(P.CRM_VIEW)),
+    business: Business = Depends(get_business), db: Session = Depends(get_db)
+):
     rows = db.execute(
         select(TelegramLink, Customer.name)
         .join(Customer, (Customer.business_id == TelegramLink.business_id)
@@ -61,6 +66,7 @@ def list_links(business: Business = Depends(get_business), db: Session = Depends
 @router.delete("/links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_link(
     link_id: uuid.UUID,
+    _: None = Depends(require(P.CRM_MANAGE)),
     business: Business = Depends(get_business),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

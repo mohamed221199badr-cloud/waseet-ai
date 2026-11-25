@@ -13,7 +13,13 @@ class Settings(BaseSettings):
     app_name: str = "Waseet AI"
     app_env: str = "dev"  # anything other than "dev" requires a real JWT_SECRET
     jwt_secret: str = "dev-only-secret-change-me-0123456789"
-    jwt_expire_minutes: int = 480
+    # Phase 1 (F3): short-lived access JWT; continuity comes from refresh tokens.
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+    # DB-backed login rate limit (sliding window, shared across workers).
+    login_max_failures_per_email: int = 5
+    login_max_failures_per_ip: int = 20
+    login_window_minutes: int = 15
     # Milestone 4: set TELEGRAM_BOT_TOKEN in your own environment/.env. Never hardcode or commit it.
     telegram_bot_token: str = ""
     telegram_link_code_ttl_hours: int = 24

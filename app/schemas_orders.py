@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CustomerCreate(BaseModel):
@@ -113,11 +113,15 @@ class ExceptionRead(BaseModel):
     id: uuid.UUID
     raw_text: str
     reason: str
+    reason_detail: str | None
+    customer_message: str | None
     quantity: int | None
     candidates: list[dict]
     status: str
+    resolution_note: str | None
+    resolved_by: uuid.UUID | None
+    resolved_at: datetime | None
     created_at: datetime
-    decided_at: datetime | None
 
 
 class OrderRead(BaseModel):
@@ -168,3 +172,17 @@ class IntakeResult(BaseModel):
 class ResolveBody(BaseModel):
     product_id: uuid.UUID
     quantity: int | None = Field(default=None, gt=0, le=1_000_000)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class DismissBody(BaseModel):
+    """B3: a dismissal must say why, so the audit trail can tell "not an order line"
+    from a mistake. The database CHECK enforces a non-empty note."""
+    note: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("note")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("note must not be blank")
+        return v.strip()

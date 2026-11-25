@@ -125,7 +125,8 @@ def test_three_unclear_answers_hand_the_line_to_the_owner(db_session, linked):
     assert "3 × سكر" in r and "المحل هيراجعها" in r
     say(db_session, 500, "تمام")
     o = orders(db_session)[0]
-    assert o.exceptions[0].reason == "customer_unclear"
+    assert o.exceptions[0].reason == "unclear_item"
+    assert o.exceptions[0].reason_detail == "customer_unclear"
 
 
 def test_tenant_comes_from_the_link_not_the_text(client, db_session, linked, two_businesses):

@@ -5,10 +5,11 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_business
+from app.api.deps import get_business, require
 from app.audit import write_audit
 from app.db import get_db
 from app.models import Business
+from app.permissions import Permission as P
 from app.repositories import inventory as repo
 from app.schemas_orders import MovementRead, StockAdjust, StockRead
 
@@ -19,6 +20,7 @@ router = APIRouter(tags=["inventory"])
 def adjust_stock(
     product_id: uuid.UUID,
     body: StockAdjust,
+    _: None = Depends(require(P.INVENTORY_MANAGE)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -50,6 +52,7 @@ def adjust_stock(
 @router.get("/products/{product_id}/movements", response_model=list[MovementRead])
 def movements(
     product_id: uuid.UUID,
+    _: None = Depends(require(P.LEDGER_VIEW)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
@@ -63,6 +66,7 @@ def movements(
 @router.get("/inventory/low-stock", response_model=list[StockRead])
 def low_stock(
     threshold: int = Query(default=10, ge=0),
+    _: None = Depends(require(P.INVENTORY_VIEW)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
