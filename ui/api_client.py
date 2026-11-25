@@ -88,3 +88,25 @@ class ApiClient:
 
     def chat_reset(self, customer_id):
         return self._req("POST", "/chat/reset", json={"customer_id": customer_id, "text": "x"})
+
+    # Phase 1: menu + staff
+    def menu_items(self): return self._req("GET", "/menu/items")
+
+    def create_menu_item(self, body: dict): return self._req("POST", "/menu/items", json=body)
+
+    def set_availability(self, item_id, is_available: bool):
+        return self._req("POST", f"/menu/items/{item_id}/availability",
+                         json={"is_available": is_available})
+
+    def update_variant(self, item_id, variant_id, **changes):
+        return self._req("PATCH", f"/menu/items/{item_id}/variants/{variant_id}",
+                         json=changes)
+
+    def import_menu(self, csv_text: str, dry_run: bool = True):
+        return self._req("POST", "/menu/import",
+                         json={"csv_text": csv_text, "dry_run": dry_run})
+
+    def menu_diff(self): return self._req("GET", "/menu/diff-report")
+    def staff(self): return self._req("GET", "/staff")
+    def create_staff(self, body: dict): return self._req("POST", "/staff", json=body)
+    def deactivate_staff(self, staff_id): return self._req("POST", f"/staff/{staff_id}/deactivate")

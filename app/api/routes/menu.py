@@ -8,12 +8,15 @@ sold-out switch, PRICE_MANAGE for changing the price of an existing variant.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_business, require
 from app.audit import write_audit
 from app.db import get_db
+from app.menu_import import import_menu_csv
 from app.models import Business, User
 from app.permissions import Permission as P
 from app.repositories import menu as repo
@@ -285,3 +288,81 @@ def delete_alias(
                 entity_id=str(alias_id), action="delete", payload={"item_id": str(item_id)})
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class ImportIn(BaseModel):
+    csv_text: str
+    dry_run: bool = True
+
+
+class ImportOut(BaseModel):
+    dry_run: bool
+    created: int
+    updated: int
+    unchanged: int
+    sha256: str
+    errors: list[dict]
+
+
+@router.post("/import", response_model=ImportOut)
+def import_menu(
+    body: ImportIn,
+    user: User = Depends(require(P.MENU_MANAGE)),
+    db: Session = Depends(get_db),
+):
+    """CSV menu import (F4). dry_run is the default; a committed import is
+    all-or-nothing and writes one audit row with the file SHA-256."""
+    try:
+        result = import_menu_csv(db, user.business_id, body.csv_text.encode("utf-8"),
+                                 dry_run=body.dry_run, actor_id=user.id)
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="File is not UTF-8") from None
+    if result.errors and not body.dry_run:
+        db.rollback()
+    return ImportOut(**result.as_dict())
+
+
+class DiffRow(BaseModel):
+    item: str
+    kind: str  # only_in_menu | only_in_products | price_differs
+    menu_price: str | None
+    product_price: str | None
+
+
+@router.get("/diff-report", response_model=list[DiffRow])
+def diff_report(
+    _: User = Depends(require(P.MENU_MANAGE)),
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_business),
+):
+    """Menu vs products (read-only, 1.6): what the dashboard menu says versus what the
+    bot still quotes from `products` until the Phase 2 cutover (B2)."""
+    from app.models import Product
+    from app.models_menu import MenuItem
+
+    def norm(s: str) -> str:
+        return " ".join(s.split()).casefold()
+
+    items = list(db.scalars(select(MenuItem).where(
+        MenuItem.business_id == business.id)))
+    products = list(db.scalars(select(Product).where(
+        Product.business_id == business.id)))
+    menu_by_name = {norm(i.name): i for i in items}
+    prod_by_name = {norm(p.name): p for p in products}
+    rows: list[DiffRow] = []
+    for key, item in sorted(menu_by_name.items()):
+        default = next((v for v in item.variants if v.is_default), None)
+        menu_price = str(default.price) if default and default.price is not None else None
+        product = prod_by_name.get(key)
+        if product is None:
+            rows.append(DiffRow(item=item.name, kind="only_in_menu",
+                                menu_price=menu_price, product_price=None))
+        elif menu_price != str(product.price):
+            rows.append(DiffRow(item=item.name, kind="price_differs",
+                                menu_price=menu_price,
+                                product_price=str(product.price)))
+    for key, product in sorted(prod_by_name.items()):
+        if key not in menu_by_name:
+            rows.append(DiffRow(item=product.name, kind="only_in_products",
+                                menu_price=None, product_price=str(product.price)))
+    return rows
