@@ -3,6 +3,8 @@
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+LLM_MODES = ("off", "assist", "chat", "open")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -38,6 +40,15 @@ class Settings(BaseSettings):
         elif self.database_url.startswith("postgresql://"):
             self.database_url = self.database_url.replace(
                 "postgresql://", "postgresql+psycopg2://", 1)
+        return self
+
+    @model_validator(mode="after")
+    def _llm_mode_must_be_known_and_safe(self):
+        if self.llm_mode not in LLM_MODES:
+            raise ValueError(f"LLM_MODE must be one of {', '.join(LLM_MODES)}")
+        # "open" relays unfiltered model text to customers: never allowed outside dev.
+        if self.llm_mode == "open" and self.app_env != "dev":
+            raise ValueError("LLM_MODE=open is allowed only when APP_ENV=dev")
         return self
 
     @model_validator(mode="after")
