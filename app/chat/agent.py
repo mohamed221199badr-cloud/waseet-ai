@@ -369,8 +369,27 @@ def _advance(db, link, session, lines, products) -> str:
     return _confirmation(db, link, lines, products)
 
 
+_HISTORY: dict = {}      # LLM_MODE=open only: link id -> [(ts, role, text)], in memory, trial use
+
+
+def _history(link) -> list[tuple[str, str]]:
+    cutoff = _now() - timedelta(minutes=settings.chat_session_ttl_minutes)
+    h = [x for x in _HISTORY.get(str(link.id), []) if x[0] > cutoff]
+    _HISTORY[str(link.id)] = h
+    return [(r, t) for _, r, t in h]
+
+
 def handle_message(db: Session, link: TelegramLink, text: str) -> str:
     """One customer message -> one reply. The caller commits."""
+    prior = _history(link) if llm.open_mode() else []
+    reply = _handle(db, link, text, prior)
+    if llm.open_mode():
+        _HISTORY[str(link.id)] = (_HISTORY.get(str(link.id), [])
+                                  + [(_now(), "user", text[:500]), (_now(), "assistant", reply[:500])])[-12:]
+    return reply
+
+
+def _handle(db: Session, link: TelegramLink, text: str, prior: list) -> str:
     if len(text) > MAX_TEXT:
         return "الرسالة طويلة جدًا. قسّمها لرسائل أقصر."
     customer = db.scalar(select(Customer).where(
@@ -468,6 +487,12 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
         if facts is not None:
             _clear(db, session)
             return facts
+        if llm.open_mode():
+            free = llm.open_reply(prior, text)      # shown as is; no order power
+            _clear(db, session)
+            if free:
+                return free
+            return _smalltalk(db, link, text, products) or MSG_DONT_GET
         turn = _llm_turn(db, link, text, products)
         if turn is not None:
             prefix, new = turn

@@ -16,11 +16,15 @@ log = logging.getLogger(__name__)
 
 def llm_enabled() -> bool:
     """assist and chat both allow product suggestions; chat additionally drives the dialogue."""
-    return settings.llm_mode in ("assist", "chat")
+    return settings.llm_mode in ("assist", "chat", "open")
 
 
 def chat_mode() -> bool:
-    return settings.llm_mode == "chat"
+    return settings.llm_mode in ("chat", "open")
+
+
+def open_mode() -> bool:
+    return settings.llm_mode == "open"
 
 
 def chat_json(system: str, user: str, *, timeout: float | None = None,
@@ -138,3 +142,32 @@ def converse(names: list[str], user: str, pending: str | None = None) -> dict | 
             return None       # model unreachable: caller uses the rule reply
         reply = _safe_reply(text)
     return {"reply": reply, "items": items}
+
+
+OPEN_SYSTEM = (
+    "انت مساعد ودود في محل جملة في مصر، بتساعد العملاء في الطلبات. اتكلم بالمصري وبجمل قصيرة. "
+    "جاوب على أي سؤال عام أو كلام عادي بحرية. ما تذكرش أسعار ولا مخزون ولا مواعيد توصيل، "
+    "النظام هو اللي بيقولها. لو العميل عايز يطلب، قوله يكتب الصنف والكمية. "
+    "ما تأكدش طلب ولا تلغيه."
+)
+
+
+def open_reply(history: list[tuple[str, str]], user: str) -> str | None:
+    """LLM_MODE=open: free-text reply shown as is (no content filters). history is the last
+    (role, text) turns. None on timeout/error so the caller uses the rule reply."""
+    if not open_mode():
+        return None
+    msgs = [{"role": "system", "content": OPEN_SYSTEM}]
+    msgs += [{"role": r, "content": t} for r, t in history[-6:]]
+    msgs.append({"role": "user", "content": user})
+    body = {"model": settings.ollama_model, "stream": False,
+            "options": {"temperature": 0.7, "num_ctx": 2048, "num_predict": 120},
+            "messages": msgs}
+    try:
+        r = httpx.post(settings.ollama_url.rstrip("/") + "/api/chat", json=body,
+                       timeout=settings.llm_open_timeout_seconds)
+        r.raise_for_status()
+        return str(r.json()["message"]["content"]).strip() or None
+    except Exception as exc:
+        log.warning("llm unavailable: %s", type(exc).__name__)
+        return None

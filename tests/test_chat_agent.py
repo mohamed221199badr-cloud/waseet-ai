@@ -353,3 +353,24 @@ def test_chat_mode_catalog_and_price_answers_come_from_the_db_not_the_model(
     assert "سكر 1 كيلو" in say(db_session, 500, "الأصناف")
     assert "28.00" in say(db_session, 500, "بكام السكر")
     assert calls == []
+
+
+def test_open_mode_shows_model_reply_as_is_with_history_but_facts_and_orders_stay_in_code(
+        db_session, linked, monkeypatch):
+    from app.chat import agent
+    from app.llm import client
+    monkeypatch.setattr(client.settings, "llm_mode", "open")
+    seen = []
+
+    def fake(history, user):
+        seen.append((list(history), user))
+        return "رد حر 123 بسعر 5 جنيه"
+    monkeypatch.setattr(client, "open_reply", fake)
+    agent._HISTORY.clear()
+    assert say(db_session, 500, "ازيك يا باشا") == "رد حر 123 بسعر 5 جنيه"
+    say(db_session, 500, "طيب وبعدين")
+    assert seen[1][0][0] == ("user", "ازيك يا باشا") and len(seen[1][0]) == 2
+    assert "سكر 1 كيلو" in say(db_session, 500, "الأصناف")       # DB, not model
+    assert len(seen) == 2
+    out = say(db_session, 500, "٣ سكر")                          # rules engine
+    assert "28.00" in out and "تمام" in out

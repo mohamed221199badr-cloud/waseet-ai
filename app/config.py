@@ -19,10 +19,11 @@ class Settings(BaseSettings):
     chat_agent_enabled: bool = True       # CHAT_AGENT_ENABLED=false -> old one-shot intake
     chat_show_prices: bool = True         # prices in the confirmation message (from DB only)
     chat_session_ttl_minutes: int = 30
-    llm_mode: str = "off"                 # off | assist | chat (model drives the dialogue)
+    llm_mode: str = "off"                 # off | assist | chat | open (open = free-text model replies, trial only)
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:1.5b"
     llm_timeout_seconds: float = 8.0
+    llm_open_timeout_seconds: float = 60.0  # LLM_MODE=open only
     llm_chat_timeout_seconds: float = 40.0  # LLM_MODE=chat only: slower, trial use
 
     @model_validator(mode="after")
