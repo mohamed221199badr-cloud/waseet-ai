@@ -21,9 +21,13 @@ REASONS = {
 }
 STATUS_AR = {"draft": "مسودة", "pending": "في انتظار الاعتماد",
              "confirmed": "معتمد", "rejected": "مرفوض"}
+CHANNEL_AR = {"whatsapp": "واتساب", "telegram": "تليجرام", "manual": "يدوي"}
 
-st.set_page_config(page_title="وسيط AI", page_icon="📦", layout="wide")
-st.markdown("<style>html, body, [data-testid='stAppViewContainer'] {direction: rtl;}"
+st.set_page_config(page_title="وسيط AI", page_icon="📦", layout="wide",
+                   initial_sidebar_state="collapsed")
+st.markdown("<style>[data-testid='stAppViewBlockContainer'], [data-testid='stSidebarContent'],"
+            " [data-testid='stSidebarHeader'] {direction: rtl;}"
+            "[data-testid='stAppDeployButton'] {display: none;}"
             "</style>", unsafe_allow_html=True)
 
 
@@ -69,8 +73,9 @@ def money(v) -> str:
 
 
 def order_header(o, customers) -> str:
+    channel = CHANNEL_AR.get(o['channel'], o['channel'])
     return (f"{customers.get(o['customer_id'], '؟')} | {STATUS_AR.get(o['status'], o['status'])}"
-            f" | {o['channel']} | {o['created_at'][:16].replace('T', ' ')}")
+            f" | {channel} | {o['created_at'][:16].replace('T', ' ')}")
 
 
 def items_table(o, products) -> None:
@@ -206,7 +211,9 @@ def telegram_page(customers, products) -> None:
         except api_client.ApiError as exc:
             show_error(exc)
     if "last_code" in st.session_state:
-        st.success(st.session_state.last_code["instruction"])
+        lc = st.session_state.last_code
+        st.success("الكود اتعمل. ابعته للعميل، يشتغل مرة واحدة وينتهي بعد 24 ساعة.")
+        st.code(f"/start {lc['code']}", language=None)
     st.divider()
     for link in c.links():
         a, b = st.columns([4, 1])
