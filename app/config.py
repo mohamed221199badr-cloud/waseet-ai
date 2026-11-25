@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     # Milestone 4: set TELEGRAM_BOT_TOKEN in your own environment/.env. Never hardcode or commit it.
     telegram_bot_token: str = ""
     telegram_link_code_ttl_hours: int = 24
+    # Milestone 5: conversational order agent (rules + DB decide; the LLM is optional).
+    chat_agent_enabled: bool = True       # CHAT_AGENT_ENABLED=false -> old one-shot intake
+    chat_show_prices: bool = True         # prices in the confirmation message (from DB only)
+    chat_session_ttl_minutes: int = 30
+    llm_mode: str = "off"                 # off | assist
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:1.5b"
+    llm_timeout_seconds: float = 8.0
 
     @model_validator(mode="after")
     def _normalize_database_url(self):
