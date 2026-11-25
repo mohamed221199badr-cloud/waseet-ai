@@ -13,7 +13,8 @@ if config.config_file_name is not None:
 
 url = os.environ.get("DATABASE_URL")
 if url:
-    config.set_main_option("sqlalchemy.url", url)
+    # "%" must be doubled for the ini interpolation (URL-encoded passwords contain it)
+    config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

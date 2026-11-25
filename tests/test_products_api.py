@@ -1,7 +1,11 @@
+
+from tests.helpers import auth_headers
+
+
 def test_create_product_and_audit(client, two_businesses, db_session):
     from app.models import AuditEvent
 
-    headers = {"X-Business-ID": str(two_businesses["a"])}
+    headers = auth_headers(two_businesses["a"])
     resp = client.post(
         "/api/v1/products",
         headers=headers,
@@ -21,10 +25,10 @@ def test_create_product_and_audit(client, two_businesses, db_session):
     assert event.payload["sku"] == "A-002"
 
 
-def test_update_and_delete_write_audit(client, two_businesses, db_session):
+def test_update_and_deactivate_write_audit(client, two_businesses, db_session):
     from app.models import AuditEvent
 
-    headers = {"X-Business-ID": str(two_businesses["a"])}
+    headers = auth_headers(two_businesses["a"])
     pid = str(two_businesses["product_a"])
     resp = client.patch(f"/api/v1/products/{pid}", headers=headers, json={"price": "12.50"})
     assert resp.status_code == 200
@@ -33,14 +37,18 @@ def test_update_and_delete_write_audit(client, two_businesses, db_session):
     ).count() == 1
 
     resp = client.delete(f"/api/v1/products/{pid}", headers=headers)
-    assert resp.status_code == 204
+    assert resp.status_code == 200 and resp.json()["is_active"] is False
+    # deactivation is an update in the audit trail; there is no "delete" any more
+    assert db_session.query(AuditEvent).filter_by(
+        entity="product", entity_id=pid, action="update"
+    ).count() == 2
     assert db_session.query(AuditEvent).filter_by(
         entity="product", entity_id=pid, action="delete"
-    ).count() == 1
+    ).count() == 0
 
 
 def test_alias_create_and_conflict(client, two_businesses):
-    headers = {"X-Business-ID": str(two_businesses["a"])}
+    headers = auth_headers(two_businesses["a"])
     pid = str(two_businesses["product_a"])
     resp = client.post(f"/api/v1/products/{pid}/aliases", headers=headers, json={"alias": "رز"})
     assert resp.status_code == 201
@@ -48,9 +56,9 @@ def test_alias_create_and_conflict(client, two_businesses):
     assert dup.status_code == 409
 
 
-def test_missing_business_header_and_unknown_business(client, two_businesses):
-    assert client.get("/api/v1/products").status_code == 422
+def test_no_token_and_token_of_unknown_user_are_401(client, two_businesses):
+    assert client.get("/api/v1/products").status_code == 401
     resp = client.get(
-        "/api/v1/products", headers={"X-Business-ID": str(two_businesses["nonexistent"])}
+        "/api/v1/products", headers=auth_headers(two_businesses["nonexistent"])
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 401

@@ -99,6 +99,27 @@ class ItemRead(BaseModel):
     line_total: Decimal
 
 
+class CandidateRead(BaseModel):
+    product_id: uuid.UUID
+    sku: str
+    name: str
+    score: float
+    kind: str
+
+
+class ExceptionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    raw_text: str
+    reason: str
+    quantity: int | None
+    candidates: list[dict]
+    status: str
+    created_at: datetime
+    decided_at: datetime | None
+
+
 class OrderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -114,3 +135,36 @@ class OrderRead(BaseModel):
     created_at: datetime
     decided_at: datetime | None
     items: list[ItemRead]
+    exceptions: list[ExceptionRead] = []
+
+
+class IntakeRequest(BaseModel):
+    """Order text from any channel. The channel only labels where it came from."""
+
+    text: str = Field(min_length=1, max_length=5000)
+    customer_id: uuid.UUID | None = None
+    customer_phone: str | None = Field(default=None, min_length=3, max_length=30)
+    channel: Literal["manual", "whatsapp", "telegram", "web"] = "manual"
+
+
+class LineResult(BaseModel):
+    raw: str
+    status: Literal["matched", "exception"]
+    reason: str | None
+    product_id: uuid.UUID | None
+    match_type: str | None
+    confidence: float | None
+    quantity: int | None
+    candidates: list[CandidateRead]
+
+
+class IntakeResult(BaseModel):
+    order: OrderRead
+    lines: list[LineResult]
+    matched_count: int
+    exception_count: int
+
+
+class ResolveBody(BaseModel):
+    product_id: uuid.UUID
+    quantity: int | None = Field(default=None, gt=0, le=1_000_000)

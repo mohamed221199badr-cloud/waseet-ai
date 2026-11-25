@@ -2,15 +2,17 @@
 
 import os
 import subprocess
+import sys
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 
 ADMIN_URL = os.environ.get(
     "ADMIN_DATABASE_URL", "postgresql+psycopg2://postgres@localhost:5433/postgres"
 )
 SCRATCH = "waseet_mig_test"
-EXPECTED = {"businesses", "users", "products", "product_aliases", "audit_events"}
+EXPECTED = {"businesses", "users", "products", "product_aliases", "audit_events"}  # M1 core
 
 
 @pytest.fixture()
@@ -19,7 +21,7 @@ def scratch_url():
     with admin.connect() as conn:
         conn.execute(text(f"DROP DATABASE IF EXISTS {SCRATCH}"))
         conn.execute(text(f"CREATE DATABASE {SCRATCH}"))
-    url = ADMIN_URL.rsplit("/", 1)[0] + f"/{SCRATCH}"
+    url = make_url(ADMIN_URL).set(database=SCRATCH).render_as_string(hide_password=False)
     yield url
     with admin.connect() as conn:
         conn.execute(text(f"DROP DATABASE IF EXISTS {SCRATCH}"))
@@ -29,7 +31,7 @@ def scratch_url():
 def _alembic(url, *args):
     env = dict(os.environ, DATABASE_URL=url)
     return subprocess.run(
-        ["python3", "-m", "alembic", *args],
+        [sys.executable, "-m", "alembic", *args],
         capture_output=True, text=True, env=env, timeout=120,
     )
 

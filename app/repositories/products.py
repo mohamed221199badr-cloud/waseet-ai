@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session
 from app.models import Product, ProductAlias
 
 
-def list_products(db: Session, business_id: uuid.UUID) -> list[Product]:
-    return list(
-        db.scalars(
-            select(Product).where(Product.business_id == business_id).order_by(Product.created_at)
-        )
-    )
+def list_products(
+    db: Session, business_id: uuid.UUID, is_active: bool | None = None
+) -> list[Product]:
+    stmt = select(Product).where(Product.business_id == business_id)
+    if is_active is not None:
+        stmt = stmt.where(Product.is_active == is_active)
+    return list(db.scalars(stmt.order_by(Product.created_at)))
 
 
 def get_product(db: Session, business_id: uuid.UUID, product_id: uuid.UUID) -> Product | None:
@@ -40,10 +41,6 @@ def update_product(product: Product, data: dict) -> Product:
     for key, value in data.items():
         setattr(product, key, value)
     return product
-
-
-def delete_product(db: Session, product: Product) -> None:
-    db.delete(product)
 
 
 def list_aliases(db: Session, business_id: uuid.UUID, product_id: uuid.UUID) -> list[ProductAlias]:

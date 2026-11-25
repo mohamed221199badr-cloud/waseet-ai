@@ -1,8 +1,10 @@
 """Inventory ledger, stock floor, low-stock list, tenant isolation."""
 
+from tests.helpers import auth_headers
+
 
 def H(biz):
-    return {"X-Business-ID": str(biz)}
+    return auth_headers(biz)
 
 
 def test_restock_and_adjust_write_ledger(client, two_businesses):

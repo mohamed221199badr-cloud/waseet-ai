@@ -3,8 +3,11 @@
 Run: python -m app.seed
 """
 
+import os
+
 from sqlalchemy import select
 
+from app.auth import hash_password
 from app.db import SessionLocal
 from app.models import Business, Product, ProductAlias, User
 
@@ -45,12 +48,17 @@ def run() -> None:
                 business = Business(name=item["name"], slug=item["slug"])
                 db.add(business)
                 db.flush()
-            if not db.scalar(
+            user = db.scalar(
                 select(User).where(
                     User.business_id == business.id, User.email == item["user"]["email"]
                 )
-            ):
-                db.add(User(business_id=business.id, role="owner", **item["user"]))
+            )
+            if user is None:
+                user = User(business_id=business.id, role="owner", **item["user"])
+                db.add(user)
+            if not user.password_hash:
+                # synthetic demo accounts only; override with SEED_PASSWORD
+                user.password_hash = hash_password(os.environ.get("SEED_PASSWORD", "demo-pass-123"))
             for p in item["products"]:
                 product = db.scalar(
                     select(Product).where(

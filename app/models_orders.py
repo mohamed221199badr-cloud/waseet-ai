@@ -18,7 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -139,6 +139,10 @@ class Order(Base):
         back_populates="order", order_by="OrderItem.created_at", lazy="selectin",
         cascade="all, delete-orphan",
     )
+    exceptions: Mapped[list["OrderException"]] = relationship(
+        back_populates="order", order_by="OrderException.created_at", lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
 
 class OrderItem(Base):
@@ -171,3 +175,37 @@ class OrderItem(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     order: Mapped[Order] = relationship(back_populates="items")
+
+
+EXCEPTION_STATUSES = ("open", "resolved", "dismissed")
+
+
+class OrderException(Base):
+    """A line of order text the matcher could not safely turn into an item.
+    A draft with open exceptions cannot be submitted until each is resolved or dismissed."""
+
+    __tablename__ = "order_exceptions"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('open','resolved','dismissed')", name="ck_order_exceptions_status"
+        ),
+        ForeignKeyConstraint(
+            ["business_id", "order_id"],
+            ["orders.business_id", "orders.id"],
+            ondelete="CASCADE",
+            name="fk_exception_order_same_business",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    raw_text: Mapped[str] = mapped_column(String(500))
+    reason: Mapped[str] = mapped_column(String(30))
+    quantity: Mapped[int | None] = mapped_column(nullable=True)
+    candidates: Mapped[list] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    order: Mapped[Order] = relationship(back_populates="exceptions")

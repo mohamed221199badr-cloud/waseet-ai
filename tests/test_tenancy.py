@@ -1,18 +1,19 @@
 """Cross-tenant isolation: 404 at API level, FK violation at DB level."""
 
-
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from tests.helpers import auth_headers
+
 
 def test_cross_tenant_get_returns_404(client, two_businesses):
-    headers_b = {"X-Business-ID": str(two_businesses["b"])}
+    headers_b = auth_headers(two_businesses["b"])
     resp = client.get(f"/api/v1/products/{two_businesses['product_a']}", headers=headers_b)
     assert resp.status_code == 404
 
 
 def test_cross_tenant_update_and_delete_return_404(client, two_businesses):
-    headers_b = {"X-Business-ID": str(two_businesses["b"])}
+    headers_b = auth_headers(two_businesses["b"])
     pid = two_businesses["product_a"]
     assert client.patch(f"/api/v1/products/{pid}", headers=headers_b,
                         json={"price": "1.00"}).status_code == 404
@@ -20,7 +21,7 @@ def test_cross_tenant_update_and_delete_return_404(client, two_businesses):
 
 
 def test_cross_tenant_alias_returns_404(client, two_businesses):
-    headers_b = {"X-Business-ID": str(two_businesses["b"])}
+    headers_b = auth_headers(two_businesses["b"])
     resp = client.post(
         f"/api/v1/products/{two_businesses['product_a']}/aliases",
         headers=headers_b,
@@ -32,7 +33,7 @@ def test_cross_tenant_alias_returns_404(client, two_businesses):
 def test_tenant_list_shows_only_own_products(client, two_businesses):
     for biz, expected in (("a", {"A-001"}), ("b", {"B-001"})):
         resp = client.get("/api/v1/products",
-                          headers={"X-Business-ID": str(two_businesses[biz])})
+                          headers=auth_headers(two_businesses[biz]))
         assert resp.status_code == 200
         assert {p["sku"] for p in resp.json()} == expected
 
@@ -55,7 +56,7 @@ def test_db_level_composite_fk_blocks_cross_tenant_alias(db_session, two_busines
 
 
 def test_duplicate_sku_same_business_rejected(client, two_businesses):
-    headers = {"X-Business-ID": str(two_businesses["a"])}
+    headers = auth_headers(two_businesses["a"])
     resp = client.post(
         "/api/v1/products", headers=headers,
         json={"sku": "A-001", "name": "مكرر", "price": "1.00"},
@@ -64,7 +65,7 @@ def test_duplicate_sku_same_business_rejected(client, two_businesses):
 
 
 def test_same_sku_allowed_across_businesses(client, two_businesses):
-    headers = {"X-Business-ID": str(two_businesses["b"])}
+    headers = auth_headers(two_businesses["b"])
     resp = client.post(
         "/api/v1/products", headers=headers,
         json={"sku": "A-001", "name": "نفس الكود لشركة تانية", "price": "1.00"},

@@ -5,9 +5,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from tests.helpers import auth_headers
+
 
 def H(biz):
-    return {"X-Business-ID": str(biz)}
+    return auth_headers(biz)
 
 
 def make_customer(client, biz, name="تاجر التجزئة", phone="01000000001"):

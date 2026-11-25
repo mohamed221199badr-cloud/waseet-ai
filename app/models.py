@@ -41,6 +41,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320))
     # Milestone 1: single owner per business. Roles (owner/approver/staff) arrive with auth later.
     role: Mapped[str] = mapped_column(String(20), default="owner")
+    # bcrypt hash (Milestone 3). NULL = this user cannot log in yet.
+    password_hash: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     business: Mapped[Business] = relationship(back_populates="users")

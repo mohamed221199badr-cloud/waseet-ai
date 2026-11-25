@@ -106,3 +106,18 @@ python -m app.seed && python -m app.seed_orders   # عملاء وأسعار خا
 الإضافة. المخزون يتخصم عند `confirm` فقط، بقفل صف (`FOR UPDATE`) فلا يحصل بيع زيادة،
 وأي بند ناقص يلغي العملية كلها. حقل `channel` + `source_text` في الطلب هو مدخل القنوات
 (واتساب/تليجرام/ويب) من غير ما المنطق يعرف القناة.
+
+## Milestone 3: تسجيل الدخول واستقبال الطلبات من نص
+
+```bash
+pip install -r requirements.txt
+alembic upgrade head
+WASEET_PASSWORD='كلمة-سر-قوية' python -m app.create_owner --slug my-shop --name "محلي" --email me@example.com
+```
+
+- `POST /api/v1/auth/login` ← `{business_slug, email, password}` يرجّع `access_token`؛ ابعته `Authorization: Bearer ...`.
+- `POST /api/v1/intake/text-order` ← `{text, customer_id | customer_phone, channel}` يرجّع مسودة طلب + قائمة الاستثناءات.
+- `POST /api/v1/orders/{id}/exceptions/{eid}/resolve | dismiss` لحسم سطر مش واضح.
+- `DELETE /api/v1/products/{id}` بقى تعطيل (`is_active=false`).
+- قياس المحرك: `python -m tests.eval.evaluate` و `python -m tests.eval.evaluate --holdout`.
+- بيانات تجريبية: `python -m app.seed` (كلمة سر الحسابات التجريبية `demo-pass-123`، غيّرها بـ `SEED_PASSWORD`).

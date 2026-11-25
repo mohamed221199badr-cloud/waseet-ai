@@ -2,9 +2,11 @@
 
 from decimal import Decimal
 
+from tests.helpers import auth_headers
+
 
 def H(biz):
-    return {"X-Business-ID": str(biz)}
+    return auth_headers(biz)
 
 
 def setup_order(client, ids, qty=2):

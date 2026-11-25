@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,10 +18,11 @@ router = APIRouter(prefix="/products", tags=["products"])
 
 @router.get("", response_model=list[ProductRead])
 def list_products(
+    is_active: bool | None = None,
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ) -> list:
-    return repo.list_products(db, business.id)
+    return repo.list_products(db, business.id, is_active)
 
 
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
@@ -89,24 +90,28 @@ def update_product(
     return product
 
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_product(
+@router.delete("/{product_id}", response_model=ProductRead)
+def deactivate_product(
     product_id: uuid.UUID,
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
+    """Products are never deleted (order lines and stock history point at them).
+    DELETE deactivates: is_active=false, hidden from matching and new orders.
+    Re-activate with PATCH {"is_active": true}. Idempotent."""
     product = _get_or_404(db, business.id, product_id)
-    write_audit(
-        db,
-        business_id=business.id,
-        entity="product",
-        entity_id=str(product.id),
-        action="delete",
-        payload={"sku": product.sku, "name": product.name},
-    )
-    repo.delete_product(db, product)
-    db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if product.is_active:
+        repo.update_product(product, {"is_active": False})
+        write_audit(
+            db,
+            business_id=business.id,
+            entity="product",
+            entity_id=str(product.id),
+            action="update",
+            payload={"is_active": False, "via": "DELETE"},
+        )
+        db.commit()
+    return product
 
 
 @router.get("/{product_id}/aliases", response_model=list[AliasRead])

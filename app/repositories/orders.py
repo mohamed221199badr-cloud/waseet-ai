@@ -131,6 +131,8 @@ def remove_item(db: Session, order: Order, item_id: uuid.UUID) -> OrderItem | No
 
 def submit(db: Session, order: Order) -> Order:
     _require_draft(order)
+    if any(e.status == "open" for e in order.exceptions):
+        raise OrderStateError("order has unresolved exceptions; resolve or dismiss them first")
     if not order.items:
         raise OrderStateError("cannot submit an empty order")
     order.status = "pending"

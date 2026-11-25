@@ -1,33 +1,54 @@
-"""Shared API dependencies: DB session + tenant resolution.
+"""Shared API dependencies: DB session, authenticated user, tenant.
 
-Milestone 1 has no auth yet; the tenant comes from the X-Business-ID header.
-When JWT auth lands (Milestone 2) this dependency is the single place to swap.
+Milestone 3: the tenant comes from the JWT (Authorization: Bearer ...), never from a
+client-supplied header. The token carries user id + business id; both are re-checked
+against the database on every request, so a deleted user's token stops working.
 """
 
 import uuid
 
-from fastapi import Depends, Header, HTTPException
+import jwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import decode_access_token
 from app.db import get_db
-from app.models import Business
+from app.models import Business, User
+
+_bearer = HTTPBearer(auto_error=False)
 
 
-def get_business_id(
-    x_business_id: str = Header(..., description="UUID of the business (tenant)"),
-) -> uuid.UUID:
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=401, detail="Invalid or missing token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def get_current_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    if creds is None:
+        raise _unauthorized()
     try:
-        return uuid.UUID(x_business_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid X-Business-ID header") from exc
+        claims = decode_access_token(creds.credentials)
+        user_id, business_id = uuid.UUID(claims["sub"]), uuid.UUID(claims["bid"])
+    except (jwt.PyJWTError, ValueError, KeyError):
+        raise _unauthorized() from None
+    user = db.scalar(select(User).where(User.id == user_id, User.business_id == business_id))
+    if user is None or not user.password_hash:
+        raise _unauthorized()
+    return user
 
 
 def get_business(
-    business_id: uuid.UUID = Depends(get_business_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Business:
-    business = db.scalar(select(Business).where(Business.id == business_id))
+    business = db.scalar(select(Business).where(Business.id == user.business_id))
     if business is None:
-        raise HTTPException(status_code=404, detail="Business not found")
+        raise _unauthorized()
     return business
