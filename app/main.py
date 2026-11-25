@@ -10,6 +10,7 @@ from app.api.routes import (
     menu,
     orders,
     products,
+    staff,
     telegram,
 )
 from app.config import settings
@@ -19,6 +20,7 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
 app.include_router(menu.router, prefix="/api/v1")
+app.include_router(staff.router, prefix="/api/v1")
 app.include_router(customers.router, prefix="/api/v1")
 app.include_router(inventory.router, prefix="/api/v1")
 app.include_router(orders.router, prefix="/api/v1")

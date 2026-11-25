@@ -68,3 +68,16 @@ def require(*perms: Permission):
         return user
 
     return checker
+
+
+def require_any(*perms: Permission):
+    """Route guard: the caller's role must hold at least one of the listed permissions
+    (e.g. staff routes open to STAFF_MANAGE or STAFF_MANAGE_LIMITED)."""
+
+    def checker(user: User = Depends(get_current_user)) -> User:
+        held = permissions_for_role(user.role)
+        if not any(p in held for p in perms):
+            raise HTTPException(status_code=403, detail="Missing permission")
+        return user
+
+    return checker
