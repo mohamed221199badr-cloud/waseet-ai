@@ -75,13 +75,14 @@ MSG_DONT_GET = ("مش فاهم قصدك. اكتب الصنف والكمية، م
                 "أعرضلك المتاح، أو كلّم المحل مباشرة.")
 
 
-def _smalltalk(db: Session, link: TelegramLink, text: str, products: dict) -> str | None:
+def _smalltalk(db: Session, link: TelegramLink, text: str, products: dict,
+               facts_only: bool = False) -> str | None:
     """Natural replies for non-order messages. All facts (names, prices) come from the DB;
     this is plain rules, no model. Returns None when the text looks like an order."""
     t = normalize(text)
-    if t in GREET or t.rstrip("؟?!. ") in GREET:
+    if not facts_only and (t in GREET or t.rstrip("؟?!. ") in GREET):
         return random.choice(GREETING_VARIANTS)
-    if t in THANKS:
+    if not facts_only and t in THANKS:
         return MSG_THANKS
     if t in HELP_Q:
         return MSG_HELP
@@ -463,6 +464,10 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
     prefix = ""
     settled = any(x["status"] != "unresolved" for x in new)
     if llm.chat_mode() and not settled:
+        facts = _smalltalk(db, link, text, products, facts_only=True)  # catalog/price: DB only
+        if facts is not None:
+            _clear(db, session)
+            return facts
         turn = _llm_turn(db, link, text, products)
         if turn is not None:
             prefix, new = turn

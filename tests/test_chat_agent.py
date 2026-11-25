@@ -345,3 +345,11 @@ def test_chat_mode_model_goes_first_for_greetings_with_plain_text_second_try(
 
     monkeypatch.setattr(llm.httpx, "post", post)
     assert say(db_session, 500, "اهلا") == "أهلاً بيك، تحب تطلب إيه؟"
+
+
+def test_chat_mode_catalog_and_price_answers_come_from_the_db_not_the_model(
+        db_session, linked, monkeypatch):
+    calls = _chat_mode(monkeypatch, {"reply": "الرجاء مشاركة الأصناف", "items": []})
+    assert "سكر 1 كيلو" in say(db_session, 500, "الأصناف")
+    assert "28.00" in say(db_session, 500, "بكام السكر")
+    assert calls == []
