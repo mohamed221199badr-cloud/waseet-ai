@@ -266,3 +266,27 @@ class TelegramUpdate(Base):
 
     update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ChatSession(Base):
+    """One open conversation per Telegram chat: where the order dialogue stands.
+    `draft` holds the lines collected so far; nothing here is an order until the customer
+    confirms. Tenant and customer come from the telegram link, never from message text."""
+
+    __tablename__ = "chat_sessions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["business_id", "customer_id"], ["customers.business_id", "customers.id"],
+            name="fk_chatsession_customer_same_business", ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), index=True
+    )
+    customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    state: Mapped[str] = mapped_column(String(20), default="collecting")
+    draft: Mapped[dict] = mapped_column(JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())

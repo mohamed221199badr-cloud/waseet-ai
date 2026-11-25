@@ -3,6 +3,8 @@
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+LLM_MODES = ("off", "assist", "chat", "open")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -15,6 +17,18 @@ class Settings(BaseSettings):
     # Milestone 4: set TELEGRAM_BOT_TOKEN in your own environment/.env. Never hardcode or commit it.
     telegram_bot_token: str = ""
     telegram_link_code_ttl_hours: int = 24
+    # Milestone 5: conversational order agent (rules + DB decide; the LLM is optional).
+    chat_agent_enabled: bool = True       # CHAT_AGENT_ENABLED=false -> old one-shot intake
+    chat_show_prices: bool = True         # prices in the confirmation message (from DB only)
+    chat_session_ttl_minutes: int = 30
+    # off | assist | chat | open. "open" shows free-text model replies unfiltered: dev/trial only,
+    # rejected at startup when APP_ENV is not "dev".
+    llm_mode: str = "off"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:1.5b"
+    llm_timeout_seconds: float = 8.0
+    llm_open_timeout_seconds: float = 60.0  # LLM_MODE=open only
+    llm_chat_timeout_seconds: float = 40.0  # LLM_MODE=chat only: slower, trial use
 
     @model_validator(mode="after")
     def _normalize_database_url(self):
@@ -26,6 +40,15 @@ class Settings(BaseSettings):
         elif self.database_url.startswith("postgresql://"):
             self.database_url = self.database_url.replace(
                 "postgresql://", "postgresql+psycopg2://", 1)
+        return self
+
+    @model_validator(mode="after")
+    def _llm_mode_must_be_known_and_safe(self):
+        if self.llm_mode not in LLM_MODES:
+            raise ValueError(f"LLM_MODE must be one of {', '.join(LLM_MODES)}")
+        # "open" relays unfiltered model text to customers: never allowed outside dev.
+        if self.llm_mode == "open" and self.app_env != "dev":
+            raise ValueError("LLM_MODE=open is allowed only when APP_ENV=dev")
         return self
 
     @model_validator(mode="after")

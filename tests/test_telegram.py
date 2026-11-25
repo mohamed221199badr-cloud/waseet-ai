@@ -19,6 +19,13 @@ from tests.test_migrations import _alembic, scratch_url  # noqa: F401
 _ids = itertools.count(1000)
 
 
+@pytest.fixture(autouse=True)
+def _one_shot_intake(monkeypatch):
+    """These tests cover the M4 one-shot intake; the M5 chat agent has its own test file."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "chat_agent_enabled", False)
+
+
 def upd(chat_id, body, *, chat_type="private", is_bot=False, update_id=None):
     return {
         "update_id": update_id if update_id is not None else next(_ids),

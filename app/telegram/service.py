@@ -8,7 +8,8 @@ Security rules:
 - chat_id is unique system-wide: one chat cannot be linked to two customers or tenants,
   and a linked chat cannot be silently re-linked (send /stop first).
 - An unlinked chat gets one fixed reply and learns nothing about any business.
-- The bot never replies with prices, stock or other customers' data.
+- The bot never replies with other customers' data. Prices/stock warnings appear only in the
+  chat-agent confirmation (own customer price, from the DB; CHAT_SHOW_PRICES=false removes them).
 - Orders created here are drafts. Confirmation stays with the owner.
 """
 
@@ -22,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
+from app.chat import agent as chat_agent
 from app.config import settings
 from app.models_orders import (
     Customer,
@@ -186,6 +188,8 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         reply = MSG_NOT_LINKED
     elif cmd.startswith("/"):
         reply = MSG_HELP
+    elif settings.chat_agent_enabled:
+        reply = chat_agent.handle_message(db, link, text)
     else:
         reply = _handle_order(db, link, text)
     db.commit()

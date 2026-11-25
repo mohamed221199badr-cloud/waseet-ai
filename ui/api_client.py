@@ -81,3 +81,8 @@ class ApiClient:
 
     def links(self): return self._req("GET", "/telegram/links")
     def revoke_link(self, link_id): return self._req("DELETE", f"/telegram/links/{link_id}")
+    def chat(self, customer_id, text):
+        return self._req("POST", "/chat/message", json={"customer_id": customer_id, "text": text})
+
+    def chat_reset(self, customer_id):
+        return self._req("POST", "/chat/reset", json={"customer_id": customer_id, "text": "x"})
