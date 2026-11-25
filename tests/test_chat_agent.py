@@ -216,3 +216,23 @@ def test_m5_migration_step_down_and_up(scratch_url):  # noqa: F811
 def test_one_sentence_with_conjunction_and_dual_form(db_session, linked):
     r = say(db_session, 500, "٣ شكاير رز 1 كيلو وكرتونتين ملح")
     assert "3 × أرز مصري 1 كيلو" in r and "2 × ملح ناعم 1 كيلو" in r
+
+
+def test_web_chat_endpoint_uses_same_agent_and_is_tenant_scoped(client, shop):  # noqa: F811
+    h, c = shop["h"], shop["c"]
+    def send(text):
+        return client.post("/api/v1/chat/message", headers=h,
+                           json={"customer_id": c["id"], "text": text})
+
+    r = send("٣ سكر")
+    assert r.status_code == 200 and "3 × سكر 1 كيلو" in r.json()["reply"]
+    r = send("تمام")
+    assert "استلمنا طلبك" in r.json()["reply"]
+    assert client.post("/api/v1/chat/reset", headers=h,
+                       json={"customer_id": c["id"], "text": "x"}).status_code == 200
+    import uuid
+    bad = client.post("/api/v1/chat/message", headers=h,
+                      json={"customer_id": str(uuid.uuid4()), "text": "٣ سكر"})
+    assert bad.status_code == 404
+    assert client.post("/api/v1/chat/message",
+                       json={"customer_id": c["id"], "text": "x"}).status_code in (401, 403)

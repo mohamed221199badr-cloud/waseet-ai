@@ -226,20 +226,47 @@ def telegram_page(customers, products) -> None:
                 show_error(exc)
 
 
+def chat_page(customers, products) -> None:
+    c = client()
+    st.subheader("جرّب وكيل المحادثة (بدون تيليجرام)")
+    st.caption("بتتكلم كأنك العميل. نفس منطق بوت تيليجرام بالظبط. "
+               "الطلب بيتسجل مسودة تظهر في «المسودات».")
+    by_name = {f"{name} ({cid[:6]})": cid for cid, name in customers.items()}
+    picked = st.selectbox("تتكلم كأنك العميل", list(by_name), index=0)
+    cid = by_name[picked]
+    key = f"chat-{cid}"
+    if key not in st.session_state:
+        st.session_state[key] = [("bot", "أهلاً! ابعت طلبك، مثال: ٣ سكر وكرتونتين زيت")]
+    if st.button("محادثة جديدة"):
+        c.chat_reset(cid)
+        st.session_state.pop(key, None)
+        st.rerun()
+    for who, text in st.session_state[key]:
+        with st.chat_message("user" if who == "me" else "assistant"):
+            st.text(text)
+    msg = st.chat_input("اكتب رسالتك للبوت")
+    if msg:
+        st.session_state[key].append(("me", msg))
+        st.session_state[key].append(("bot", c.chat(cid, msg)["reply"]))
+        st.rerun()
+
+
 def main() -> None:
     if "me" not in st.session_state:
         login_form()
         return
     me = st.session_state.me
     st.sidebar.write(f"**{me['business_name']}**\n\n{me['email']}")
-    page = st.sidebar.radio("الصفحة", ["المسودات", "في انتظار الاعتماد", "السجل", "تيليجرام"])
+    page = st.sidebar.radio(
+        "الصفحة", ["المسودات", "في انتظار الاعتماد", "السجل", "تيليجرام", "جرّب البوت"])
     if st.sidebar.button("خروج"):
         st.session_state.clear()
         st.rerun()
     try:
         customers, products = lookups()
         {"المسودات": drafts_page, "في انتظار الاعتماد": pending_page,
-         "السجل": history_page, "تيليجرام": telegram_page}[page](customers, products)
+         "السجل": history_page, "تيليجرام": telegram_page,
+         "جرّب البوت": chat_page}[page](customers, products)
     except api_client.ApiError as exc:
         show_error(exc)
         if exc.status == 401:
