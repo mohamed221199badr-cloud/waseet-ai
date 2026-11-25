@@ -110,3 +110,7 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(20))  # create | update | delete
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
+
+
+# Milestone 2 tables (registered on the same Base)
+from app import models_orders  # noqa: E402,F401

@@ -75,3 +75,34 @@ app/
 alembic/               الهجرات
 tests/                 pytest
 ```
+
+---
+
+## Milestone 2 — العملاء والتسعير والمخزون والطلبات
+
+جداول جديدة (migration `m2_0001`): `customers` / `customer_prices` / `inventory_movements` /
+`orders` / `order_items`. كل جدول فيه `business_id` وكل علاقة بين الجداول بمفتاح مركب
+`(business_id, id)` فمستحيل قاعدة البيانات تقبل ربط بين شركتين.
+
+```bash
+python -m alembic upgrade head
+python -m app.seed && python -m app.seed_orders   # عملاء وأسعار خاصة وطلب معلّق لكل شركة
+```
+
+دورة الطلب: `draft` ← (submit) ← `pending` ← (confirm | reject) ← `confirmed` | `rejected`.
+
+| الطريق | الوظيفة |
+|---|---|
+| `POST/GET /api/v1/customers`, `GET/PATCH /customers/{id}` | العملاء (الموبايل فريد داخل الشركة) |
+| `PUT/DELETE /customers/{id}/prices/{product_id}`, `GET /customers/{id}/prices` | سعر خاص لعميل |
+| `POST /products/{id}/stock` | إضافة/خصم مخزون يدويًا (`delta` + `reason`) |
+| `GET /products/{id}/movements`, `GET /inventory/low-stock?threshold=` | سجل حركة المخزون والنواقص |
+| `POST /orders` (+ items اختيارية), `GET /orders?status=`, `GET /orders/{id}` | الطلبات |
+| `POST /orders/{id}/items`, `DELETE /orders/{id}/items/{item_id}` | تعديل المسودة فقط |
+| `POST /orders/{id}/submit` / `confirm` / `reject` | اعتماد الطلب بموافقة المستخدم |
+| `DELETE /orders/{id}` | حذف المسودة فقط |
+
+قواعد مهمة: السعر الخاص بالعميل يغلب سعر الكتالوج، والسعر يتجمّد على بند الطلب وقت
+الإضافة. المخزون يتخصم عند `confirm` فقط، بقفل صف (`FOR UPDATE`) فلا يحصل بيع زيادة،
+وأي بند ناقص يلغي العملية كلها. حقل `channel` + `source_text` في الطلب هو مدخل القنوات
+(واتساب/تليجرام/ويب) من غير ما المنطق يعرف القناة.
