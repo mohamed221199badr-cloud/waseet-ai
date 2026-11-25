@@ -25,7 +25,7 @@ CHANNEL_AR = {"whatsapp": "واتساب", "telegram": "تليجرام", "manual"
 
 st.set_page_config(page_title="وسيط AI", page_icon="📦", layout="wide",
                    initial_sidebar_state="collapsed")
-st.markdown("<style>[data-testid='stAppViewBlockContainer'], [data-testid='stSidebarContent'],"
+st.markdown("<style>[data-testid='stMainBlockContainer'], [data-testid='stSidebarContent'],"
             " [data-testid='stSidebarHeader'] {direction: rtl;}"
             "[data-testid='stAppDeployButton'] {display: none;}"
             "</style>", unsafe_allow_html=True)
