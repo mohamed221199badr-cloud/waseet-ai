@@ -7,6 +7,7 @@ from app.api.routes import (
     health,
     intake,
     inventory,
+    menu,
     orders,
     products,
     telegram,
@@ -17,6 +18,7 @@ app = FastAPI(title=settings.app_name, version="0.4.0")
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
+app.include_router(menu.router, prefix="/api/v1")
 app.include_router(customers.router, prefix="/api/v1")
 app.include_router(inventory.router, prefix="/api/v1")
 app.include_router(orders.router, prefix="/api/v1")
