@@ -196,6 +196,31 @@ def _split_conjunctions(db, business_id, raw: str) -> list:
         r.product_id is not None for r in results) else []
 
 
+def _llm_turn(db, link, text, products, pending=None):
+    """LLM_MODE=chat: let the model read the message. Items it proposes are re-written as
+    "<qty> <name>" and sent through the matching engine, so product, quantity and ambiguity
+    are still decided by rules + DB. Returns (reply_prefix, lines) or None to fall back."""
+    out = llm.converse(sorted(p.name for p in products.values()), text, pending)
+    if out is None:
+        return None
+    said = _numbers_in(text)
+    lines = []
+    for name, qty in out["items"]:
+        # a quantity the customer never wrote is not trusted: ask "كام؟" instead
+        q = f"{qty} " if qty in said or qty == 1 else ""
+        lines += _lines_from_text(db, link.business_id, f"{q}{name}", products)
+    return out["reply"], _real_lines(lines)
+
+
+def _numbers_in(text: str) -> set[int]:
+    """Quantities actually present in the customer's message: digits, number words, duals."""
+    from app.matching.parser import _NUMBER_WORDS
+    t = normalize_digits(normalize(text))
+    nums = {int(x) for x in re.findall(r"\d+", t)}
+    nums |= {_NUMBER_WORDS[w] for w in t.split() if w in _NUMBER_WORDS}
+    return nums
+
+
 def _real_lines(lines: list[dict]) -> list[dict]:
     """Drop chatter: an unmatched line with no quantity is not an item the customer ordered."""
     return [x for x in lines if not (x["status"] == "unresolved" and not x["qty"])]
@@ -361,6 +386,14 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
                   else _apply_choice(line, text, products))
             if not ok:
                 chat = _smalltalk(db, link, text, products)
+                if chat is None and llm.chat_mode():
+                    turn = _llm_turn(db, link, text, products, _next_question(lines, products))
+                    if turn is not None and not turn[1]:
+                        chat = turn[0] or MSG_DONT_GET
+                    elif turn is not None:
+                        lines += turn[1]
+                        return (turn[0] + "\n\n" if turn[0] else "") + _advance(
+                            db, link, session, lines, products)
                 if chat is not None:      # greeting/question: answer, then repeat the question
                     _save(db, link, session, "clarifying", lines)
                     return chat + "\n\n" + (_next_question(lines, products) or "")
@@ -392,6 +425,15 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
             _clear(db, session)
             return MSG_CANCELLED
         chat = _smalltalk(db, link, text, products)
+        if chat is None and llm.chat_mode() and not _real_lines(
+                _lines_from_text(db, link.business_id, text, products)):
+            turn = _llm_turn(db, link, text, products, "تأكيد الطلب")
+            if turn is not None and turn[1]:
+                lines += turn[1]
+                return (turn[0] + "\n\n" if turn[0] else "") + _advance(
+                    db, link, session, lines, products)
+            if turn is not None:
+                chat = turn[0] or MSG_REASK_CONFIRM
         if chat is not None:
             return chat + "\n\n" + _confirmation(db, link, lines, products)
         # otherwise: more items for the same order
@@ -406,14 +448,22 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
         return _advance(db, link, session, lines, products)
 
     # collecting (new message, or an idle session)
-    chat = _smalltalk(db, link, text, products)
-    if chat is not None:
-        _clear(db, session)
-        return chat
     new = _lines_from_text(db, link.business_id, text, products)
-    if not new or all(x["status"] == "unresolved" and not x["qty"] for x in new):
+    parsed = bool(new) and not all(x["status"] == "unresolved" and not x["qty"] for x in new)
+    prefix = ""
+    settled = any(x["status"] != "unresolved" for x in new)
+    if llm.chat_mode() and not settled:
+        turn = _llm_turn(db, link, text, products)
+        if turn is not None:
+            prefix, new = turn
+            if not new:
+                _clear(db, session)
+                return prefix or _smalltalk(db, link, text, products) or MSG_DONT_GET
+            parsed = True
+    if not parsed:
+        chat = _smalltalk(db, link, text, products)
         _clear(db, session)
-        return MSG_DONT_GET
+        return chat if chat is not None else MSG_DONT_GET
     if len(new) > MAX_LINES:
         return "عدد البنود كبير. قسّم الطلب لأكتر من رسالة."
-    return _advance(db, link, session, new, products)
+    return (prefix + "\n\n" if prefix else "") + _advance(db, link, session, new, products)

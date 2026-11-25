@@ -281,3 +281,54 @@ def test_llm_never_suggests_for_chatter_or_dissimilar_words(db_session, linked, 
     assert calls == []                          # no quantity -> model not even asked
     r = say(db_session, 500, "٢ مكرونه سباجتي")  # model says item 1, but it looks nothing alike
     assert "قصدك" not in r
+
+
+# ---- LLM_MODE=chat (Ollama mocked) ------------------------------------------------------
+def _chat_mode(monkeypatch, payload):
+    monkeypatch.setattr(settings, "llm_mode", "chat")
+    body = payload if isinstance(payload, str) else json.dumps(payload)
+    return _fake_ollama(monkeypatch, body)
+
+
+def test_chat_mode_greeting_uses_model_reply(db_session, linked, monkeypatch):
+    _chat_mode(monkeypatch, {"reply": "أهلاً بيك، تحب تطلب إيه؟", "items": []})
+    assert say(db_session, 500, "ازيك عامل ايه") == "أهلاً بيك، تحب تطلب إيه؟"
+
+
+def test_chat_mode_rejects_unsafe_model_replies(db_session, linked, monkeypatch):
+    for bad in ("السكر بـ 30 جنيه", "السكر ٣٠", "تم تأكيد طلبك", "للأسف مش متوفر"):
+        _chat_mode(monkeypatch, {"reply": bad, "items": []})
+        r = say(db_session, 500, "ازيك عامل ايه")
+        assert bad not in r                     # falls back to the rule reply
+
+
+def test_chat_mode_items_are_validated_by_the_engine_and_db(db_session, linked, monkeypatch):
+    _chat_mode(monkeypatch, {"reply": "", "items": [
+        {"name": "سكر", "qty": 3}, {"name": "ماكينة حلاقة", "qty": 2}]})
+    r = say(db_session, 500, "ممكن تبعتلي الحاجة الحلوة تلاتة وماكينة حلاقة اتنين")
+    assert "3 × سكر 1 كيلو = 84.00" in r      # price from DB, not from the model
+    assert "ماكينة" in r and "المحل هيراجعها" in r  # unknown product never invented
+    assert orders(db_session) == []             # model cannot create the order
+    assert "استلمنا" in say(db_session, 500, "تمام")  # only the customer's "تمام" does
+
+
+def test_chat_mode_untrusted_quantity_is_asked_not_used(db_session, linked, monkeypatch):
+    _chat_mode(monkeypatch, {"reply": "", "items": [{"name": "سكر", "qty": 40}]})
+    r = say(db_session, 500, "عايز سكر كتير")   # the customer never wrote 40
+    assert "كام" in r and "40" not in r
+
+
+def test_chat_mode_model_cannot_confirm_or_cancel(db_session, linked, monkeypatch):
+    say(db_session, 500, "٣ سكر")
+    _chat_mode(monkeypatch, {"reply": "تم تأكيد الطلب", "items": []})
+    r = say(db_session, 500, "ممم")
+    assert "تم تأكيد" not in r and orders(db_session) == []
+
+
+def test_chat_mode_down_or_slow_falls_back_to_rules(db_session, linked, monkeypatch):
+    monkeypatch.setattr(settings, "llm_mode", "chat")
+    calls = _fake_ollama(monkeypatch, exc=httpx.ReadTimeout("slow"))
+    r = say(db_session, 500, "السلام عليكم")
+    assert "أهلاً بيك" in r                     # rule greeting
+    assert calls and calls[0][1] == settings.llm_chat_timeout_seconds
+    assert "3 × سكر" in say(db_session, 500, "٣ سكر")

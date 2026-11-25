@@ -15,22 +15,28 @@ log = logging.getLogger(__name__)
 
 
 def llm_enabled() -> bool:
-    return settings.llm_mode == "assist"
+    """assist and chat both allow product suggestions; chat additionally drives the dialogue."""
+    return settings.llm_mode in ("assist", "chat")
 
 
-def chat_json(system: str, user: str) -> dict | None:
+def chat_mode() -> bool:
+    return settings.llm_mode == "chat"
+
+
+def chat_json(system: str, user: str, *, timeout: float | None = None,
+              num_predict: int = 80, num_ctx: int = 1024) -> dict | None:
     """Ask Ollama for a JSON object. None on any error, timeout, or non-object answer."""
     if not llm_enabled():
         return None
     body = {
         "model": settings.ollama_model, "stream": False, "format": "json",
-        "options": {"temperature": 0, "num_ctx": 1024, "num_predict": 80},
+        "options": {"temperature": 0, "num_ctx": num_ctx, "num_predict": num_predict},
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     }
     try:
         r = httpx.post(
             settings.ollama_url.rstrip("/") + "/api/chat", json=body,
-            timeout=settings.llm_timeout_seconds,
+            timeout=timeout or settings.llm_timeout_seconds,
         )
         r.raise_for_status()
         out = json.loads(r.json()["message"]["content"])
@@ -56,3 +62,49 @@ def suggest_product(raw_text: str, names: list[str]) -> int | None:
     except (TypeError, ValueError):
         return None
     return n - 1 if n is not None and 1 <= n <= len(names) else None
+
+
+def converse(names: list[str], user: str, pending: str | None = None) -> dict | None:
+    """LLM_MODE=chat: one dialogue turn. Returns {"reply": str, "items": [(name, qty)]} or
+    None (timeout, error, invalid output) so the caller falls back to the rules.
+    The model only PROPOSES: items are re-validated by the matching engine against the DB,
+    and a reply containing any digit or money word is rejected (prices, stock and quantities
+    are written by code only)."""
+    if not chat_mode():
+        return None
+    catalog = "، ".join(names[:30])
+    system = (
+        "انت بوت استلام طلبات لمحل جملة في مصر. اتكلم بالمصري، جمل قصيرة ومحترمة. "
+        "مهمتك: تفهم رسالة العميل. لو العميل بيطلب أصناف، استخرجها في items (الاسم زي ما "
+        "قاله والكمية رقم). لو بيسلم أو بيسأل سؤال بسيط، رد عليه بشكل ودود في reply وقوله "
+        "يكتب الصنف والكمية. ممنوع تذكر أي سعر أو مخزون أو رقم في reply، ولا تأكد الطلب "
+        "ولا تلغيه. الأصناف المتاحة: " + catalog + ". "
+        "أمثلة. العميل: عايز اتنين رز وكيلو سكر -> "
+        '{"reply": "", "items": [{"name": "رز", "qty": 2}, {"name": "سكر", "qty": 1}]} . '
+        'العميل: السلام عليكم -> {"reply": "أهلاً بيك، تحب تطلب إيه؟", "items": []} . '
+        'العميل: مين انت -> {"reply": "أنا بوت بستقبل طلبات المحل. اكتب الصنف والكمية.", '
+        '"items": []} . '
+        "لو مش طلب ولا سلام، خلي reply فاضي. ممنوع تقول إن حاجة متوفرة أو مش متوفرة، "
+        "وممنوع تتكلم عن التوصيل أو المكان. رد JSON بس. "
+        + (f" السؤال المفتوح مع العميل: {pending}" if pending else "")
+    )
+    out = chat_json(system, user, timeout=settings.llm_chat_timeout_seconds,
+                    num_predict=160, num_ctx=1536)
+    if not out:
+        return None
+    reply = out.get("reply")
+    reply = reply.strip() if isinstance(reply, str) else ""
+    if len(reply) > 300 or any(c.isdigit() or c in "٠١٢٣٤٥٦٧٨٩" for c in reply) \
+            or any(w in reply for w in (
+                "جنيه", "سعر", "مخزون", "تم تأكيد", "تم الغاء", "تم إلغاء", "متوفر", "نتوفر",
+                "توفر", "توصيل", "نوصل", "بتوصل", "القاهرة", "مصر", "اعتذر", "أعتذر")):
+        reply = ""
+    items = []
+    for it in (out.get("items") or [])[:20]:
+        try:
+            name, qty = str(it["name"]).strip(), int(float(it["qty"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if name and 0 < qty <= 100000:
+            items.append((name, qty))
+    return {"reply": reply, "items": items}
