@@ -114,7 +114,7 @@ def test_session_expires(db_session, linked, monkeypatch):
     monkeypatch.setattr(settings, "chat_session_ttl_minutes", -1)
     r = say(db_session, 500, "تمام")           # stale session is dropped; "تمام" is not an order
     assert orders(db_session) == []
-    assert "ما لقيتش" in r
+    assert "مش فاهم" in r
 
 
 def test_three_unclear_answers_hand_the_line_to_the_owner(db_session, linked):
@@ -187,6 +187,8 @@ def test_llm_suggestion_is_validated_and_still_asks_the_customer(db_session, lin
     _fake_ollama(monkeypatch, json.dumps({"choice": 99}))
     assert "ما لقيتش أصناف" in say(db_session, 500, "٣ سكرر ابيض ناعم جدا")
     # a valid suggestion becomes a question, never a silent pick
+    from app.chat import agent as chat_agent
+    monkeypatch.setattr(chat_agent, "MIN_SUGGEST_SIMILARITY", 0)
     _fake_ollama(monkeypatch, json.dumps({"choice": 1}))
     q = say(db_session, 500, "٣ بسكويت")
     assert "قصدك" in q and "اكتب 1 للتأكيد" in q
@@ -246,3 +248,36 @@ def test_llm_can_never_confirm_or_cancel_an_order(db_session, linked, monkeypatc
     assert "اكتب «تمام»" in r and orders(db_session) == []
     assert db_session.scalar(select(func.count()).select_from(ChatSession)) == 1
     assert calls == [] or all("اختار رقم" not in str(c) for c in calls)
+
+
+def test_non_order_messages_get_natural_different_replies(db_session, linked):
+    seen = set()
+    for text in ["السلام عليكم", "شكرا", "الأصناف", "كام سعر السكر", "ايه ده", "مساعدة"]:
+        seen.add(say(db_session, 500, text))
+    assert len(seen) == 6                       # never the same canned reply
+    assert "سكر 1 كيلو" in say(db_session, 500, "الأصناف")
+    assert "28.00" in say(db_session, 500, "بكام السكر")
+    assert orders(db_session) == []
+    assert db_session.scalar(select(func.count()).select_from(OrderException)) == 0
+
+
+def test_greeting_in_the_middle_does_not_trap_or_corrupt_the_order(db_session, linked):
+    q = say(db_session, 500, "٣ رز")
+    r = say(db_session, 500, "مرحبا")
+    assert "أهلاً بيك" in r and q in r          # greeting answered, question repeated
+    r = say(db_session, 500, "٢ سكر")           # customer moves on: new item added
+    assert "قصدك" in r or "2 × سكر" in r
+    say(db_session, 500, "الغي")
+    say(db_session, 500, "٣ سكر")
+    r = say(db_session, 500, "شكرا")
+    assert "العفو" in r and "3 × سكر" in r      # still confirming, order intact
+    assert "استلمنا" in say(db_session, 500, "تمام")
+
+
+def test_llm_never_suggests_for_chatter_or_dissimilar_words(db_session, linked, monkeypatch):
+    monkeypatch.setattr(settings, "llm_mode", "assist")
+    calls = _fake_ollama(monkeypatch, json.dumps({"choice": 1}))
+    say(db_session, 500, "Hi")
+    assert calls == []                          # no quantity -> model not even asked
+    r = say(db_session, 500, "٢ مكرونه سباجتي")  # model says item 1, but it looks nothing alike
+    assert "قصدك" not in r

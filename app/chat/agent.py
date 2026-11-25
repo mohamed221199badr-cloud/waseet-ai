@@ -32,6 +32,7 @@ from app.repositories import intake as intake_repo
 from app.repositories import orders as orders_repo
 
 MAX_TEXT = 5000
+MIN_SUGGEST_SIMILARITY = 55
 MAX_LINES = 60
 
 YES = {normalize(w) for w in (
@@ -44,11 +45,55 @@ SKIP = {normalize(w) for w in ("0", "لا", "لأ", "مش دول", "تخطى", "
 
 MSG_CANCELLED = "تمام، ألغيت الطلب. ابعت طلب جديد في أي وقت."
 MSG_NOTHING = ("ما لقيتش أصناف من اللي كتبتها في الكتالوج. جرّب تكتب الاسم بشكل تاني، "
-               "أو كلّم المحل مباشرة.")
+               "أو اكتب «الأصناف» أعرضلك المتاح.")
 MSG_AFTER_CONFIRM = "استلمنا طلبك (رقم {oid}). لسه مسودة لحد ما المحل يعتمده."
 MSG_REASK_CHOICE = "ما فهمتش. اكتب رقم من القائمة، أو 0 لو مش من دول."
 MSG_REASK_QTY = "ما فهمتش الكمية. اكتب رقم بس، مثال: 3"
 MSG_REASK_CONFIRM = "اكتب «تمام» لتأكيد الطلب، أو «الغي» لإلغائه، أو ابعت صنف زيادة."
+
+
+GREET = {normalize(w) for w in (
+    "السلام عليكم", "سلام عليكم", "سلام", "مرحبا", "اهلا", "أهلا", "هاي", "هلا", "hi", "hello",
+    "ازيك", "إزيك", "صباح الخير", "مساء الخير", "صباح النور", "ازيك يا ريس", "ازاي حضرتك")}
+THANKS = {normalize(w) for w in ("شكرا", "شكراً", "تسلم", "متشكر", "الله يسلمك", "ميرسي", "thanks")}
+HELP_Q = {normalize(w) for w in ("مساعدة", "help", "ازاي", "ازاي اطلب", "اعمل ايه")}
+CATALOG_Q = ("الاصناف", "المنتجات", "عندكم ايه", "عندكو ايه", "عندك ايه", "فيه ايه", "المتاح")
+PRICE_Q = ("سعر", "بكام", "كام سعر", "اسعار")
+
+MSG_GREETING = ("أهلاً بيك! أنا بوت استلام الطلبات. اكتب اللي عايزه والكمية، مثال: ٣ سكر "
+                "وكرتونتين زيت. أو اكتب «الأصناف» أعرضلك المتاح.")
+MSG_THANKS = "العفو! لو عايز حاجة تانية ابعت طلبك في أي وقت."
+MSG_HELP = ("بتكتب الصنف والكمية، وأنا أسألك لو في حاجة مش واضحة وأعرضلك الطلب تأكده.\n"
+            "مثال: ٣ سكر وكرتونتين زيت. «الأصناف» لعرض المتاح، «الغي» لإلغاء الطلب.")
+MSG_DONT_GET = ("مش فاهم قصدك. اكتب الصنف والكمية، مثال: ٣ سكر. أو اكتب «الأصناف» "
+                "أعرضلك المتاح، أو كلّم المحل مباشرة.")
+
+
+def _smalltalk(db: Session, link: TelegramLink, text: str, products: dict) -> str | None:
+    """Natural replies for non-order messages. All facts (names, prices) come from the DB;
+    this is plain rules, no model. Returns None when the text looks like an order."""
+    t = normalize(text)
+    if t in GREET or t.rstrip("؟?!. ") in GREET:
+        return MSG_GREETING
+    if t in THANKS:
+        return MSG_THANKS
+    if t in HELP_Q:
+        return MSG_HELP
+    if any(k in t for k in CATALOG_Q) and not any(ch.isdigit() for ch in normalize_digits(t)):
+        names = sorted(p.name for p in products.values())
+        return ("المتاح عندنا:\n" + "\n".join(f"• {n}" for n in names[:30])
+                + "\nاكتب اللي عايزه والكمية.") if names else MSG_DONT_GET
+    if any(k in t for k in PRICE_Q) and not any(ch.isdigit() for ch in normalize_digits(t)):
+        res = [r for r in intake_repo.build_matcher(db, link.business_id).match_text(
+            " ".join(w for w in t.split() if w not in {"كام", "سعر", "بكام", "اسعار"}))
+            if r.product_id]
+        if res:
+            p = products.get(str(res[0].product_id))
+            if p is not None:
+                price, _ = orders_repo.resolve_price(db, link.business_id, link.customer_id, p)
+                return f"{p.name}: {price}. لو عايز تطلب اكتب الكمية."
+        return "قولي اسم الصنف وأقولك سعره، مثال: «سعر السكر»."
+    return None
 
 
 # ---- session storage ------------------------------------------------------------------
@@ -122,10 +167,14 @@ def _lines_from_text(db: Session, business_id, text: str, products: dict[str, Pr
     # optional LLM hint for lines the rules could not place at all (never auto-accepted)
     if llm.llm_enabled():
         for line in out:
-            if line["status"] == "unresolved" and line["reason"] == "not_found":
+            # only for lines that look like an order (have a quantity), never for chatter
+            if (line["status"] == "unresolved" and line["reason"] == "not_found"
+                    and line["qty"]):
                 names = _top_names(line["raw"], products)
                 idx = llm.suggest_product(line["raw"], [n for _, n in names])
-                if idx is not None:
+                # the suggestion must also look like the typed word, or it is dropped
+                if idx is not None and fuzz.partial_ratio(
+                        normalize(line["raw"]), normalize(names[idx][1])) >= MIN_SUGGEST_SIMILARITY:
                     line.update(candidates=[names[idx][0]], status="need_choice",
                                 reason="llm_suggestion")
     return out
@@ -145,6 +194,11 @@ def _split_conjunctions(db, business_id, raw: str) -> list:
     results = [r for p in parts for r in matcher.match_text(p)]
     return results if len(results) == len(parts) and all(
         r.product_id is not None for r in results) else []
+
+
+def _real_lines(lines: list[dict]) -> list[dict]:
+    """Drop chatter: an unmatched line with no quantity is not an item the customer ordered."""
+    return [x for x in lines if not (x["status"] == "unresolved" and not x["qty"])]
 
 
 def _top_names(raw: str, products: dict[str, Product], n: int = 8) -> list[tuple[str, str]]:
@@ -306,6 +360,19 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
             ok = (_apply_qty(line, text) if line["status"] == "need_qty"
                   else _apply_choice(line, text, products))
             if not ok:
+                chat = _smalltalk(db, link, text, products)
+                if chat is not None:      # greeting/question: answer, then repeat the question
+                    _save(db, link, session, "clarifying", lines)
+                    return chat + "\n\n" + (_next_question(lines, products) or "")
+                extra = _real_lines(_lines_from_text(db, link.business_id, text, products))
+                if any(x["status"] != "unresolved" for x in extra):
+                    # the customer moved on to new items: add them, keep the open question
+                    have = {ln["product_id"] for ln in lines if ln.get("product_id")}
+                    for x in extra:
+                        if x["status"] == "ok" and x["product_id"] in have:
+                            x.update(status="unresolved", reason="duplicate_product")
+                    lines += extra
+                    return _advance(db, link, session, lines, products)
                 line["asked"] = line.get("asked", 0) + 1
                 if line["asked"] >= 3:  # stop nagging: the owner will settle this line
                     line.update(status="unresolved", reason="customer_unclear")
@@ -324,8 +391,11 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
         if label == "no":
             _clear(db, session)
             return MSG_CANCELLED
+        chat = _smalltalk(db, link, text, products)
+        if chat is not None:
+            return chat + "\n\n" + _confirmation(db, link, lines, products)
         # otherwise: more items for the same order
-        new = _lines_from_text(db, link.business_id, text, products)
+        new = _real_lines(_lines_from_text(db, link.business_id, text, products))
         if not new:
             return MSG_REASK_CONFIRM
         have = {ln["product_id"] for ln in lines if ln.get("product_id")}
@@ -336,9 +406,14 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
         return _advance(db, link, session, lines, products)
 
     # collecting (new message, or an idle session)
+    chat = _smalltalk(db, link, text, products)
+    if chat is not None:
+        _clear(db, session)
+        return chat
     new = _lines_from_text(db, link.business_id, text, products)
-    if not new:
-        return "ما لقيتش بنود في الرسالة. اكتب الصنف والكمية، مثال: ٣ سكر"
+    if not new or all(x["status"] == "unresolved" and not x["qty"] for x in new):
+        _clear(db, session)
+        return MSG_DONT_GET
     if len(new) > MAX_LINES:
         return "عدد البنود كبير. قسّم الطلب لأكتر من رسالة."
     return _advance(db, link, session, new, products)
