@@ -1,0 +1,14 @@
+# اختياري: تشغيل PostgreSQL بالدocker. لو بتثبت PostgreSQL مباشرة على الجهاز مش هتحتاج الملف ده.
+services:
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: waseet_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
