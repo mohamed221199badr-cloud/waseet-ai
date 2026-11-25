@@ -11,6 +11,7 @@ the LLM (optional) only suggests.
 """
 
 import copy
+import random
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -62,6 +63,11 @@ PRICE_Q = ("سعر", "بكام", "كام سعر", "اسعار")
 
 MSG_GREETING = ("أهلاً بيك! أنا بوت استلام الطلبات. اكتب اللي عايزه والكمية، مثال: ٣ سكر "
                 "وكرتونتين زيت. أو اكتب «الأصناف» أعرضلك المتاح.")
+GREETING_VARIANTS = (
+    MSG_GREETING,
+    "أهلاً وسهلاً! ابعتلي الصنف والكمية وأنا أجهزلك الطلب. «الأصناف» تعرضلك المتاح.",
+    "يا مرحب! عايز تطلب إيه؟ اكتب الصنف والكمية، مثال: ٣ سكر.",
+)
 MSG_THANKS = "العفو! لو عايز حاجة تانية ابعت طلبك في أي وقت."
 MSG_HELP = ("بتكتب الصنف والكمية، وأنا أسألك لو في حاجة مش واضحة وأعرضلك الطلب تأكده.\n"
             "مثال: ٣ سكر وكرتونتين زيت. «الأصناف» لعرض المتاح، «الغي» لإلغاء الطلب.")
@@ -74,7 +80,7 @@ def _smalltalk(db: Session, link: TelegramLink, text: str, products: dict) -> st
     this is plain rules, no model. Returns None when the text looks like an order."""
     t = normalize(text)
     if t in GREET or t.rstrip("؟?!. ") in GREET:
-        return MSG_GREETING
+        return random.choice(GREETING_VARIANTS)
     if t in THANKS:
         return MSG_THANKS
     if t in HELP_Q:
@@ -385,7 +391,7 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
             ok = (_apply_qty(line, text) if line["status"] == "need_qty"
                   else _apply_choice(line, text, products))
             if not ok:
-                chat = _smalltalk(db, link, text, products)
+                chat = None if llm.chat_mode() else _smalltalk(db, link, text, products)
                 if chat is None and llm.chat_mode():
                     turn = _llm_turn(db, link, text, products, _next_question(lines, products))
                     if turn is not None and not turn[1]:
@@ -394,6 +400,8 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
                         lines += turn[1]
                         return (turn[0] + "\n\n" if turn[0] else "") + _advance(
                             db, link, session, lines, products)
+                if chat is None and llm.chat_mode():
+                    chat = _smalltalk(db, link, text, products)   # model failed: rule text
                 if chat is not None:      # greeting/question: answer, then repeat the question
                     _save(db, link, session, "clarifying", lines)
                     return chat + "\n\n" + (_next_question(lines, products) or "")
@@ -424,7 +432,7 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
         if label == "no":
             _clear(db, session)
             return MSG_CANCELLED
-        chat = _smalltalk(db, link, text, products)
+        chat = None if llm.chat_mode() else _smalltalk(db, link, text, products)
         if chat is None and llm.chat_mode() and not _real_lines(
                 _lines_from_text(db, link.business_id, text, products)):
             turn = _llm_turn(db, link, text, products, "تأكيد الطلب")
@@ -434,6 +442,8 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
                     db, link, session, lines, products)
             if turn is not None:
                 chat = turn[0] or MSG_REASK_CONFIRM
+        if chat is None and llm.chat_mode():
+            chat = _smalltalk(db, link, text, products)
         if chat is not None:
             return chat + "\n\n" + _confirmation(db, link, lines, products)
         # otherwise: more items for the same order

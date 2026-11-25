@@ -264,7 +264,7 @@ def test_non_order_messages_get_natural_different_replies(db_session, linked):
 def test_greeting_in_the_middle_does_not_trap_or_corrupt_the_order(db_session, linked):
     q = say(db_session, 500, "٣ رز")
     r = say(db_session, 500, "مرحبا")
-    assert "أهلاً بيك" in r and q in r          # greeting answered, question repeated
+    assert q in r and ("مثال" in r or "الأصناف" in r)          # greeting answered, question repeated
     r = say(db_session, 500, "٢ سكر")           # customer moves on: new item added
     assert "قصدك" in r or "2 × سكر" in r
     say(db_session, 500, "الغي")
@@ -329,6 +329,19 @@ def test_chat_mode_down_or_slow_falls_back_to_rules(db_session, linked, monkeypa
     monkeypatch.setattr(settings, "llm_mode", "chat")
     calls = _fake_ollama(monkeypatch, exc=httpx.ReadTimeout("slow"))
     r = say(db_session, 500, "السلام عليكم")
-    assert "أهلاً بيك" in r                     # rule greeting
+    assert "الصنف والكمية" in r or "الأصناف" in r  # rule greeting
     assert calls and calls[0][1] == settings.llm_chat_timeout_seconds
     assert "3 × سكر" in say(db_session, 500, "٣ سكر")
+
+
+def test_chat_mode_model_goes_first_for_greetings_with_plain_text_second_try(
+        db_session, linked, monkeypatch):
+    monkeypatch.setattr(settings, "llm_mode", "chat")
+    answers = iter(["{}", "أهلاً بيك، تحب تطلب إيه؟"])
+
+    def post(url, json=None, timeout=None):
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, request=req, json={"message": {"content": next(answers)}})
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    assert say(db_session, 500, "اهلا") == "أهلاً بيك، تحب تطلب إيه؟"

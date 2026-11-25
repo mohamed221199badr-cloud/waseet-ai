@@ -46,6 +46,35 @@ def chat_json(system: str, user: str, *, timeout: float | None = None,
     return out if isinstance(out, dict) else None
 
 
+def chat_text(system: str, user: str, *, timeout: float, num_predict: int = 60) -> str | None:
+    """Plain-text Ollama reply (no JSON mode). None on any failure."""
+    body = {
+        "model": settings.ollama_model, "stream": False,
+        "options": {"temperature": 0.6, "num_ctx": 1024, "num_predict": num_predict},
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    try:
+        r = httpx.post(settings.ollama_url.rstrip("/") + "/api/chat", json=body, timeout=timeout)
+        r.raise_for_status()
+        return str(r.json()["message"]["content"]).strip()
+    except Exception as exc:
+        log.warning("llm unavailable: %s", type(exc).__name__)
+        return None
+
+
+def _safe_reply(reply) -> str:
+    """Reject anything the model must not say: numbers, prices, availability/delivery/place
+    claims, confirm/cancel wording, over-long or mostly non-Arabic text."""
+    reply = reply.strip() if isinstance(reply, str) else ""
+    bad = ("جنيه", "سعر", "مخزون", "تم تأكيد", "تم الغاء", "تم إلغاء", "متوفر", "نتوفر", "توفر",
+           "توصيل", "نوصل", "بتوصل", "القاهرة", "مصر", "اعتذر", "أعتذر")
+    arabic = sum("\u0600" <= c <= "\u06ff" for c in reply)
+    if (not reply or len(reply) > 200 or any(c.isdigit() for c in reply)
+            or any(w in reply for w in bad) or arabic < len(reply) * 0.6):
+        return ""
+    return reply
+
+
 def suggest_product(raw_text: str, names: list[str]) -> int | None:
     """Index into `names` the model thinks the customer meant, or None. The caller must
     still ask the customer; a suggestion is never auto-accepted."""
@@ -90,21 +119,22 @@ def converse(names: list[str], user: str, pending: str | None = None) -> dict | 
     )
     out = chat_json(system, user, timeout=settings.llm_chat_timeout_seconds,
                     num_predict=160, num_ctx=1536)
-    if not out:
-        return None
-    reply = out.get("reply")
-    reply = reply.strip() if isinstance(reply, str) else ""
-    if len(reply) > 300 or any(c.isdigit() or c in "٠١٢٣٤٥٦٧٨٩" for c in reply) \
-            or any(w in reply for w in (
-                "جنيه", "سعر", "مخزون", "تم تأكيد", "تم الغاء", "تم إلغاء", "متوفر", "نتوفر",
-                "توفر", "توصيل", "نوصل", "بتوصل", "القاهرة", "مصر", "اعتذر", "أعتذر")):
-        reply = ""
+    reply = _safe_reply(out.get("reply")) if out else ""
     items = []
-    for it in (out.get("items") or [])[:20]:
+    for it in ((out or {}).get("items") or [])[:20]:
         try:
             name, qty = str(it["name"]).strip(), int(float(it["qty"]))
         except (KeyError, TypeError, ValueError):
             continue
         if name and 0 < qty <= 100000:
             items.append((name, qty))
+    if not items and not reply:
+        # JSON mode often gives {} for small talk: ask once more for a plain short reply
+        text = chat_text(
+            "انت بوت استلام طلبات لمحل جملة. رد على العميل بجملة واحدة قصيرة بالمصري ودودة، "
+            "وقوله يكتب الصنف والكمية لو عايز يطلب. من غير أرقام وأسعار ووعود.",
+            user, timeout=settings.llm_chat_timeout_seconds)
+        if text is None and out is None:
+            return None       # model unreachable: caller uses the rule reply
+        reply = _safe_reply(text)
     return {"reply": reply, "items": items}
