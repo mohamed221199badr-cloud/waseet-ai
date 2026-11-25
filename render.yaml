@@ -1,0 +1,20 @@
+# Render blueprint: the Waseet FastAPI backend as a free web service.
+# Postgres comes from Neon/Supabase (free tier) - pass it as DATABASE_URL.
+# The Streamlit UI deploys separately on Streamlit Community Cloud (see DEPLOY.md).
+services:
+  - type: web
+    name: waseet-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash deploy/start_api.sh
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false        # paste the Neon/Supabase connection string in the dashboard
+      - key: APP_ENV
+        value: prod
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SEED_DEMO
+        value: "0"         # set to "1" once to load the synthetic demo businesses

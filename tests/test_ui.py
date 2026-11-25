@@ -137,4 +137,4 @@ def test_screen_telegram_code(client, shop, monkeypatch):  # noqa: F811
     at.selectbox[0].select_index(0).run()
     [b for b in at.button if b.label == "إنشاء كود"][0].click()
     at.run()
-    assert not at.exception and "/start " in at.success[0].value
+    assert not at.exception and any("/start " in c.value for c in at.code)

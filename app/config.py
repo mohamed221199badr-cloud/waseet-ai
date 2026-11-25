@@ -17,6 +17,18 @@ class Settings(BaseSettings):
     telegram_link_code_ttl_hours: int = 24
 
     @model_validator(mode="after")
+    def _normalize_database_url(self):
+        # Neon/Supabase/Heroku-style URLs come as postgres:// or postgresql://;
+        # make the psycopg2 driver explicit so both forms work unchanged.
+        if self.database_url.startswith("postgres://"):
+            self.database_url = self.database_url.replace(
+                "postgres://", "postgresql+psycopg2://", 1)
+        elif self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace(
+                "postgresql://", "postgresql+psycopg2://", 1)
+        return self
+
+    @model_validator(mode="after")
     def _secret_must_be_real_outside_dev(self):
         if self.app_env != "dev" and (
             self.jwt_secret.startswith("dev-only") or len(self.jwt_secret) < 32

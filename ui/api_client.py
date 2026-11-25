@@ -8,6 +8,19 @@ import httpx
 DEFAULT_URL = "http://localhost:8000/api/v1"
 
 
+def _default_url() -> str:
+    """Env var first; on Streamlit Community Cloud the value lives in st.secrets."""
+    url = os.environ.get("WASEET_API_URL")
+    if url:
+        return url
+    try:
+        import streamlit as st
+
+        return str(st.secrets.get("WASEET_API_URL", DEFAULT_URL))
+    except Exception:
+        return DEFAULT_URL
+
+
 class ApiError(Exception):
     def __init__(self, status: int, detail: str):
         super().__init__(detail)
@@ -28,7 +41,7 @@ def _detail(resp: httpx.Response) -> str:
 class ApiClient:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  http: httpx.Client | None = None):
-        self.base_url = (base_url or os.environ.get("WASEET_API_URL") or DEFAULT_URL).rstrip("/")
+        self.base_url = (base_url or _default_url()).rstrip("/")
         self.token = token
         self._http = http or httpx.Client(timeout=15)
 

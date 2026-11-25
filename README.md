@@ -149,3 +149,7 @@ streamlit run ui/app.py                               # الشاشة على http
 ```
 
 `WASEET_API_URL` (افتراضي `http://localhost:8000/api/v1`). الدخول بنفس slug/إيميل/كلمة سر المالك.
+
+## النشر المجاني (رابط ثابت)
+
+خطوات تشغيل المنصة على Neon + Render + Streamlit Community Cloud في [DEPLOY.md](DEPLOY.md).
