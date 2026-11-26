@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.audit import write_audit
 from app.chat import agent as chat_agent
 from app.chat import callbacks as cb_codec
-from app.chat import checkout, menu_buttons, menu_catalog
+from app.chat import cashier_actions, checkout, menu_buttons, menu_catalog
 from app.config import settings
 from app.models_orders import (
     Customer,
@@ -184,6 +184,21 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
             or sender.get("is_bot") or not isinstance(data, str)):
         return None, None, None
     link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+    parsed = cb_codec.parse(data)
+    if parsed is not None and parsed.action in cashier_actions.ACTIONS:
+        # cashier taps work for env-listed chats that have no link: handled first
+        who = sender.get("first_name") or sender.get("username") or str(chat_id)
+        msg_id = msg.get("message_id")
+        text, rows, edit = cashier_actions.handle(db, link, chat_id, parsed, msg_id, who)
+        if edit and isinstance(msg_id, int):
+            orig = (msg.get("text") or "").split("\n\n⟫ ")[0]
+            shown = f"{orig}\n\n⟫ {text}" if text else orig
+            rep = Reply(chat_id, shown, answer_callback_id=cq.get("id"),
+                        edit_message_id=msg_id)
+            rep.button_rows = rows or []
+        else:
+            rep = Reply(chat_id, text, answer_callback_id=cq.get("id"))
+        return chat_id, None, rep
     if link is None and settings.chat_agent_enabled:
         link = _auto_link(db, chat_id, sender)
         if link is not None:
@@ -245,8 +260,12 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     _finalize puts it in db.info); it is sent after the customer's own reply."""
     db.info.pop("order_notify", None)
     replies = _handle_update(db, update)
-    for chat_id, text in db.info.pop("order_notify", []):
-        replies.append(Reply(chat_id, text))
+    for item in db.info.pop("order_notify", []):
+        chat_id, text = item[0], item[1]
+        rep = Reply(chat_id, text)
+        if len(item) > 2:
+            rep.button_rows = item[2]
+        replies.append(rep)
     return replies
 
 

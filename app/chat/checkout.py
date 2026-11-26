@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import write_audit
 from app.chat import agent as legacy
-from app.chat import callbacks, menu_agent, menu_buttons, onboarding
+from app.chat import callbacks, cashier_actions, menu_agent, menu_buttons, onboarding
 from app.config import settings
 from app.matching.normalize import normalize
 from app.models_orders import Customer, TelegramLink
@@ -268,7 +268,8 @@ def _queue_cashier_notice(db: Session, link: TelegramLink, customer, order,
         TelegramLink.is_owner.is_(True))).all()
     chat_ids = list(dict.fromkeys(
         [o.chat_id for o in owners] + settings.cashier_telegram_chats))
-    db.info.setdefault("order_notify", []).extend((cid, text) for cid in chat_ids)
+    rows = cashier_actions.notice_rows(order.id)
+    db.info.setdefault("order_notify", []).extend((cid, text, rows) for cid in chat_ids)
 
 
 def _finalize(db: Session, link: TelegramLink, session, ui: dict,

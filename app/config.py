@@ -29,6 +29,20 @@ class Settings(BaseSettings):
     # WhatsApp sending needs a Cloud API sender (not built yet); the list is read here.
     cashier_telegram_chat_ids: str = ""
     cashier_whatsapp_numbers: str = ""
+    kitchen_telegram_chat_ids: str = ""    # confirmed orders: items only
+    accounts_telegram_chat_ids: str = ""   # confirmed orders: prices and totals
+
+    @staticmethod
+    def _ids(raw: str) -> list[int]:
+        return [int(x) for x in raw.replace(" ", "").split(",") if x.lstrip("-").isdigit()]
+
+    @property
+    def kitchen_telegram_chats(self) -> list[int]:
+        return self._ids(self.kitchen_telegram_chat_ids)
+
+    @property
+    def accounts_telegram_chats(self) -> list[int]:
+        return self._ids(self.accounts_telegram_chat_ids)
 
     @property
     def cashier_telegram_chats(self) -> list[int]:

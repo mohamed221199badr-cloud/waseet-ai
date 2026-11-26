@@ -28,6 +28,7 @@ Actions:
     ckaddr:<keep|change>      checkout: reuse the saved address?
     ckok                      checkout: final confirm, send to the cashier
     ckno                      checkout: cancel checkout, keep the cart
+    oky:<order> / orj:<order> / orr:<order>:<na|far|no>   cashier confirm / reject / reason
     noop                      inert button (current page indicator)
 
 Legacy slice-A payloads (cat_<PREFIX>, buy_, pick_, view_cart, cart_confirm, ...) stay
@@ -74,6 +75,10 @@ def parse(data: str) -> Callback | None:
         return None
     if action == "ckaddr" and args[0] not in ("keep", "change"):
         return None
+    if action in ("oky", "orj", "orr", "orb") and not _is_uuid(args[0]):
+        return None
+    if action == "orr" and args[1] not in ("na", "far", "no"):
+        return None
     if action in ("it",) and not _is_uuid(args[0]):
         return None
     if action in ("var",) and not _is_uuid(args[0]):
@@ -87,6 +92,7 @@ _ARITY = {
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
     "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0, "addr": 0, "home": 0, "done": 0,
     "srch": 0, "ckdel": 1, "ckaddr": 1, "ckok": 0, "ckno": 0,
+    "oky": 1, "orj": 1, "orr": 2, "orb": 1,
 }
 
 
