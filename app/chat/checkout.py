@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.audit import write_audit
 from app.chat import agent as legacy
 from app.chat import callbacks, menu_agent, menu_buttons, onboarding
+from app.matching.normalize import normalize
 from app.models_orders import Customer, TelegramLink
 
 MSG_PHONE = "محتاجين رقمك عشان نأكد الطلب."
@@ -33,7 +34,11 @@ MSG_DELIVERY_TYPE = "الطلب دليفري ولا استلام؟"
 MSG_ADDRESS_ASK = "اكتب العنوان بالتفصيل (المنطقة، الشارع، علامة مميزة)."
 MSG_ADDRESS_BAD = "العنوان قصير أوي. اكتبه بالتفصيل لو سمحت."
 MSG_ADDRESS_REUSE = "هتستلم على العنوان السابق؟\n{address}"
-MSG_DONE = "تمام ✅ طلبك اتبعت للكاشير، وهيتأكد معاك قريب.\nرقم الطلب: {oid}"
+MSG_DONE = "تمام ✅ طلبك اتبعت للكاشير وجاري التنفيذ.\nرقم الطلب: {oid}"
+# typed words that confirm the order, honoured ONLY at the final-confirm step
+FINISH = {normalize(w) for w in ("تمام", "تم", "إنهاء", "انهاء", "إنهاء الطلب",
+                                       "انهاء الطلب", "خلصت", "تمام خلصت", "خلاص",
+                                       "تأكيد", "تاكيد", "اكد", "أكد", "ok", "اوك")}
 
 _CONTACT_KEYBOARD = [[{"text": BTN_SHARE_CONTACT, "request_contact": True}]]
 _METHOD_LABEL = {"delivery": "دليفري 🛵", "pickup": "استلام من المحل 🏪"}
@@ -259,7 +264,8 @@ def _finalize(db: Session, link: TelegramLink, session, ui: dict,
                          "has_address": bool(address)})
     legacy._clear(db, session)  # spec: clear the session draft on final confirm
     return _spec(MSG_DONE.format(oid=str(order.id)[:8]),
-                 rows=[[("🛒 طلب جديد", callbacks.build("cats"))]],
+                 rows=[[("✅ تمام، خلصت", callbacks.build("done"))],
+                       [("🛒 طلب جديد", callbacks.build("cats"))]],
                  remove_keyboard=True, edit_id=edit_id)
 
 
@@ -291,6 +297,11 @@ def handle_text(db: Session, link: TelegramLink, text: str) -> dict:
         spec = _summary_spec(db, link, ui, lines, edit_id=ui.get("msg_id"))
         menu_buttons._save(db, session, ui)
         return spec
+
+    if step == "awaiting_final_confirm" and legacy._is(text, FINISH):
+        # typed «تمام»/«إنهاء» at the final review = the ✅ button. Earlier steps
+        # (phone, delivery type, address) never take it: they re-show below.
+        return _finalize(db, link, session, ui, lines, edit_id=ui.get("msg_id"))
 
     # awaiting_phone (typed text isn't a phone here) / reuse / final: re-show
     return current_spec(db, link)

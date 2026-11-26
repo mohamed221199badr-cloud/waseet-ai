@@ -292,3 +292,31 @@ def test_confirm_with_same_variant_added_twice_creates_one_summed_line(
     assert "اتبعت للكاشير" in rep.text
     rows = db_session.scalars(select(OrderLine)).all()
     assert len(rows) == 1 and rows[0].quantity == 3
+
+
+def test_post_order_screen_has_finish_button(db_session, linked, menu):  # noqa: F811
+    _fill_cart(db_session, menu)
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    rep = tap(db_session, cb_codec.build("ckok"))
+    labels = _flat(rep.button_rows)
+    assert "✅ تمام، خلصت" in labels and "🛒 طلب جديد" in labels
+    done = tap(db_session, cb_codec.build("done"))
+    assert "شكراً ليك" in done.text
+    assert "🛒 طلب جديد" in _flat(done.button_rows)
+
+
+def test_typed_finish_word_confirms_only_at_final_step(db_session, linked, menu):  # noqa: F811
+    _fill_cart(db_session, menu)
+    tap(db_session, cb_codec.build("cok"))                 # delivery question open
+    out = _say(db_session, "تمام")
+    assert "دليفري ولا استلام" in out[0].text              # NOT a confirm yet
+    assert db_session.scalar(select(Order)) is None
+    tap(db_session, cb_codec.build("ckdel", "pickup"))     # final review
+    out = _say(db_session, "إنهاء")
+    assert "جاري التنفيذ" in out[0].text and "رقم الطلب" in out[0].text
+    order = db_session.scalar(select(Order))
+    assert order.status == "pending"
+    again = _say(db_session, "تمام")                       # no second order
+    assert len(db_session.scalars(select(Order)).all()) == 1
+    assert again is not None

@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.chat import callbacks as cb_codec
 from app.config import settings
+from app.models import Business
 from app.models_menu import MenuCategory, MenuItem, MenuItemVariant
 from app.models_orders import Order
 from app.telegram import service as svc
@@ -274,7 +275,41 @@ def test_start_shows_main_menu_directly(db_session, linked, menu):  # noqa: F811
     # no onboarding gate (checkout spec 2026-11-26): categories + search + cart
     assert any("اللحوم" in lbl for lbl in labels)
     assert "🔍 بحث" in labels and "🛒 السلة" in labels
-    assert "📋 عرض المنيو" in labels and "📞 تواصل معنا" in labels
+    assert "📋 عرض المنيو" not in labels
+    assert "📍 العنوان" in labels and "📞 تواصل معنا" in labels
+    assert rep.photo_file_id is None and "🖼 رفع صورة الترحيب" not in labels  # customer
+
+
+def test_start_with_welcome_photo_is_one_photo_message(db_session, linked, menu):  # noqa: F811
+    biz = db_session.scalar(select(Business))
+    biz.menu_photo_file_id = "brochure-id"
+    db_session.commit()
+    out = svc.handle_update(db_session, {
+        "update_id": next(_ids),
+        "message": {"message_id": 1, "text": "/start",
+                    "chat": {"id": CHAT, "type": "private"},
+                    "from": {"id": CHAT, "is_bot": False}}})
+    rep = out[0]
+    assert rep.photo_file_id == "brochure-id" and "أهلاً وسهلاً" in rep.text
+    assert any("اللحوم" in lbl for lbl in _flat(rep.button_rows))
+
+
+def test_address_and_contact_buttons_are_separate(db_session, linked, menu):  # noqa: F811
+    addr = tap(db_session, cb_codec.build("addr"))
+    assert "منيا القمح" in addr.text and "01017597501" not in addr.text
+    con = tap(db_session, cb_codec.build("contact"))
+    assert "01017597501" in con.text and "01553799899" in con.text
+    assert "منيا القمح" not in con.text
+
+
+def test_owner_sees_upload_button_only_without_photo(db_session, linked, menu):  # noqa: F811
+    _make_owner(db_session, CHAT)
+    out = svc.handle_update(db_session, {
+        "update_id": next(_ids),
+        "message": {"message_id": 1, "text": "/start",
+                    "chat": {"id": CHAT, "type": "private"},
+                    "from": {"id": CHAT, "is_bot": False}}})
+    assert "🖼 رفع صورة الترحيب" in _flat(out[0].button_rows)
 
 
 def _make_owner(db, chat_id):
@@ -322,5 +357,18 @@ def test_contact_button_shows_shop_details(db_session, linked, menu):  # noqa: F
     assert "تواصل معنا" in rep.text
     assert "01017597501" in rep.text and "01040756249" in rep.text
     assert "01553799899" in rep.text
-    assert "منيا القمح" in rep.text
     assert "🔙 رجوع" in _flat(rep.button_rows)
+
+
+def test_welcome_has_meat_button_and_hides_pastry_until_it_exists(db_session, linked, menu):  # noqa: F811
+    out = svc.handle_update(db_session, {
+        "update_id": next(_ids),
+        "message": {"message_id": 1, "text": "/start",
+                    "chat": {"id": CHAT, "type": "private"},
+                    "from": {"id": CHAT, "is_bot": False}}})
+    labels = _flat(out[0].button_rows)
+    assert "🥩 منيو اللحوم" in labels
+    assert not any("الفطائر" in lbl for lbl in labels)
+    assert not any(lbl.endswith("مصنعات وقطعيات") for lbl in labels)  # moved behind the button
+    rep = tap(db_session, cb_codec.build("cats"))
+    assert any("اللحوم" in lbl for lbl in _flat(rep.button_rows))
