@@ -62,6 +62,8 @@ class MenuItem(Base):
     unit_label: Mapped[str | None] = mapped_column(String(30), nullable=True)  # e.g. "كيلو"
     min_quantity: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # owner-uploaded item photo (Telegram file_id, m014); used by the item-photos phase
+    photo_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     sort_order: Mapped[int] = mapped_column(default=0)
     is_available: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
@@ -91,6 +93,9 @@ class MenuCategory(Base):
     )
     name: Mapped[str] = mapped_column(String(200))
     sort_order: Mapped[int] = mapped_column(default=0)
+    # owner-uploaded page photo (Telegram file_id, m014); shown when a customer
+    # opens the category, with the item buttons under it
+    photo_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
