@@ -178,7 +178,8 @@ def test_order_audit_trail(client, two_businesses, db_session):
     for step in ("submit", "confirm"):
         client.post(f"/api/v1/orders/{o['id']}/{step}", headers=H(biz))
     events = db_session.query(AuditEvent).filter_by(business_id=biz, entity="order").all()
-    statuses = [e.payload.get("status") for e in events if e.action == "update"]
+    # Phase 3: transitions audit as status_change (from/to + actor), written by the service
+    statuses = [e.payload.get("to") for e in events if e.action == "status_change"]
     assert statuses == ["awaiting_confirmation", "confirmed"]
     assert db_session.query(AuditEvent).filter_by(business_id=biz, entity="stock").count() == 0
 

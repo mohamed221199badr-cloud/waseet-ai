@@ -200,3 +200,33 @@ def test_menu_order_submits_via_repo(db_session, world):
     from app.repositories import orders as orders_repo
     orders_repo.submit(db_session, world["order"])
     assert world["order"].status == "awaiting_confirmation"
+
+
+def test_api_submit_records_user_actor(client, two_businesses, db_session):
+    # dashboard transitions are attributed to the staff user in order_status_history
+    from tests.test_orders import H, setup_order
+    ids = two_businesses
+    biz = ids["a"]
+    _, o = setup_order(client, ids)
+    assert client.post(f"/api/v1/orders/{o['id']}/submit", headers=H(biz)).status_code == 200
+    hist = db_session.scalars(select(OrderStatusHistory).where(
+        OrderStatusHistory.order_id == uuid.UUID(o["id"]))).all()
+    assert [(h.from_status, h.to_status, h.actor_type) for h in hist] == [
+        ("draft", "awaiting_confirmation", "user")]
+    assert hist[0].actor_id is not None
+
+
+def test_menu_order_with_open_exception_stays_draft(db_session, world):
+    # customer submit is refused while exceptions are open (staff resolve first)
+    from app.models_orders import OrderException
+    from app.repositories import orders as orders_repo
+    db_session.add(OrderException(
+        business_id=world["biz"], order_id=world["order"].id, raw_text="كبيبة",
+        reason="price_required", reason_detail="menu_price_null", customer_message="كبيبة شامي"))
+    db_session.flush()
+    with pytest.raises(orders_repo.OrderStateError):
+        orders_repo.submit(db_session, world["order"], actor_type="customer")
+    assert world["order"].status == "draft"
+    assert db_session.scalar(select(OrderStatusHistory).where(
+        OrderStatusHistory.order_id == world["order"].id)) is None
+

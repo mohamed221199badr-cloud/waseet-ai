@@ -52,10 +52,12 @@ def _now() -> datetime:
 
 def _allowed(role: str | None, perm: P | None, actor_type: str) -> bool:
     if actor_type == "customer":
-        return perm is None
+        return perm is None  # customers only do the open (permission-free) transitions
     if actor_type == "system":
-        return perm is None
-    return role is not None and perm is not None and perm in ROLE_PERMISSIONS.get(role, frozenset())
+        return True  # internal automation; already gated by the calling code path
+    # staff: open transitions (perm None) are allowed for any staff role; guarded ones
+    # need the permission on the caller's role
+    return perm is None or (role is not None and perm in ROLE_PERMISSIONS.get(role, frozenset()))
 
 
 def transition(db: Session, order: Order, to_status: str, *,
@@ -87,7 +89,7 @@ def transition(db: Session, order: Order, to_status: str, *,
     db.add(OrderStatusHistory(
         business_id=order.business_id, order_id=order.id,
         from_status=from_status, to_status=to_status,
-        actor_type=actor_type, actor_id=actor_id if actor_type != "customer" else None,
+        actor_type=actor_type, actor_id=actor_id if actor_type == "user" else None,
         reason=reason))
     write_audit(db, business_id=order.business_id, entity="order", entity_id=str(order.id),
                 action="status_change",

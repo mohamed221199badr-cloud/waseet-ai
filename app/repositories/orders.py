@@ -5,16 +5,16 @@ and frozen on the item. Stock is deducted only when the order is confirmed.
 """
 
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Product
-from app.models_orders import Order, OrderItem
+from app.models_orders import Order, OrderException, OrderItem, OrderLine
 from app.repositories import customers as customers_repo
 from app.repositories import inventory
+from app.services import order_status as status_svc
 
 
 class OrderStateError(Exception):
@@ -129,20 +129,40 @@ def remove_item(db: Session, order: Order, item_id: uuid.UUID) -> OrderItem | No
     return item
 
 
-def submit(db: Session, order: Order) -> Order:
+def submit(db: Session, order: Order, *, actor_type: str = "system",
+           role: str | None = None, actor_id: uuid.UUID | None = None) -> Order:
+    """draft -> awaiting_confirmation through OrderStatusService (history + audit).
+
+    The bot passes actor_type="customer"; the dashboard passes the staff user.
+    Raises OrderStateError when the order cannot be submitted (the bot catches this
+    and leaves the order as a draft)."""
     _require_draft(order)
-    if any(e.status == "open" for e in order.exceptions):
+    # direct counts, not the ORM collections: selectin-loaded relationships can be stale
+    # inside the session that just flushed new exception/line rows
+    open_exceptions = db.scalar(select(func.count()).select_from(OrderException).where(
+        OrderException.business_id == order.business_id,
+        OrderException.order_id == order.id, OrderException.status == "open"))
+    if open_exceptions:
         raise OrderStateError("order has unresolved exceptions; resolve or dismiss them first")
-    if not order.items and not order.lines:
+    items = db.scalar(select(func.count()).select_from(OrderItem).where(
+        OrderItem.business_id == order.business_id, OrderItem.order_id == order.id))
+    lines = db.scalar(select(func.count()).select_from(OrderLine).where(
+        OrderLine.business_id == order.business_id, OrderLine.order_id == order.id))
+    if not items and not lines:
         raise OrderStateError("cannot submit an empty order")
-    order.status = "awaiting_confirmation"
-    db.flush()
+    try:
+        status_svc.transition(db, order, "awaiting_confirmation",
+                              actor_type=actor_type, role=role, actor_id=actor_id)
+    except status_svc.TransitionError as exc:
+        raise OrderStateError(str(exc)) from None
     return order
 
 
-def confirm(db: Session, order: Order) -> Order:
-    """awaiting_confirmation -> confirmed. Locks products in id order (no deadlocks), deducts stock
-    atomically; if any line lacks stock nothing changes."""
+def confirm(db: Session, order: Order, *, actor_type: str = "system",
+            role: str | None = None, actor_id: uuid.UUID | None = None) -> Order:
+    """awaiting_confirmation -> confirmed. Locks products in id order (no deadlocks), deducts
+    stock atomically (if any line lacks stock nothing changes), then moves the order through
+    OrderStatusService so confirmed_total, history and the audit event are recorded."""
     if order.status != "awaiting_confirmation":
         raise OrderStateError(
             f"order is {order.status}; only awaiting_confirmation orders can be confirmed")
@@ -151,18 +171,24 @@ def confirm(db: Session, order: Order) -> Order:
         inventory.apply_delta(
             db, product, -item.quantity, "order_confirmed", order_id=order.id
         )
-    order.status = "confirmed"
-    order.decided_at = datetime.now(timezone.utc)
-    db.flush()
+    try:
+        status_svc.transition(db, order, "confirmed",
+                              actor_type=actor_type, role=role, actor_id=actor_id)
+    except status_svc.TransitionError as exc:
+        raise OrderStateError(str(exc)) from None
     return order
 
 
-def reject(db: Session, order: Order, reason: str | None) -> Order:
+def reject(db: Session, order: Order, reason: str | None, *, actor_type: str = "system",
+           role: str | None = None, actor_id: uuid.UUID | None = None) -> Order:
     if order.status != "awaiting_confirmation":
         raise OrderStateError(
             f"order is {order.status}; only awaiting_confirmation orders can be rejected")
-    order.status = "rejected"
     order.rejection_reason = reason
-    order.decided_at = datetime.now(timezone.utc)
-    db.flush()
+    try:
+        status_svc.transition(db, order, "rejected",
+                              actor_type=actor_type, role=role, actor_id=actor_id,
+                              reason=reason)
+    except status_svc.TransitionError as exc:
+        raise OrderStateError(str(exc)) from None
     return order

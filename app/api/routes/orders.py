@@ -132,20 +132,16 @@ def remove_item(
 @router.post("/{order_id}/submit", response_model=OrderRead)
 def submit_order(
     order_id: uuid.UUID,
-    _: None = Depends(require(P.ORDER_CREATE_MANUAL)),
+    user=Depends(require(P.ORDER_CREATE_MANUAL)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
     order = _order_or_404(db, business.id, order_id, lock=True)
     try:
-        repo.submit(db, order)
+        repo.submit(db, order, actor_type="user", role=user.role, actor_id=user.id)
     except repo.OrderStateError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    write_audit(
-        db, business_id=business.id, entity="order", entity_id=str(order.id), action="update",
-        payload={"status": "awaiting_confirmation", "total": str(order.total)},
-    )
     db.commit()
     db.refresh(order)
     return order
@@ -154,13 +150,13 @@ def submit_order(
 @router.post("/{order_id}/confirm", response_model=OrderRead)
 def confirm_order(
     order_id: uuid.UUID,
-    _: None = Depends(require(P.ORDER_CONFIRM)),
+    user=Depends(require(P.ORDER_CONFIRM)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
     order = _order_or_404(db, business.id, order_id, lock=True)
     try:
-        repo.confirm(db, order)
+        repo.confirm(db, order, actor_type="user", role=user.role, actor_id=user.id)
     except repo.OrderStateError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from None
@@ -171,10 +167,6 @@ def confirm_order(
             detail=f"Insufficient stock for product {exc.product_id}: "
                    f"available {exc.available}, requested {exc.requested}",
         ) from None
-    write_audit(
-        db, business_id=business.id, entity="order", entity_id=str(order.id), action="update",
-        payload={"status": "confirmed", "total": str(order.total)},
-    )
     db.commit()
     db.refresh(order)
     return order
@@ -184,21 +176,17 @@ def confirm_order(
 def reject_order(
     order_id: uuid.UUID,
     body: RejectBody | None = None,
-    _: None = Depends(require(P.ORDER_REJECT)),
+    user=Depends(require(P.ORDER_REJECT)),
     business: Business = Depends(get_business),
     db: Session = Depends(get_db),
 ):
     order = _order_or_404(db, business.id, order_id, lock=True)
     reason = body.reason if body else None
     try:
-        repo.reject(db, order, reason)
+        repo.reject(db, order, reason, actor_type="user", role=user.role, actor_id=user.id)
     except repo.OrderStateError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    write_audit(
-        db, business_id=business.id, entity="order", entity_id=str(order.id), action="update",
-        payload={"status": "rejected", "reason": reason},
-    )
     db.commit()
     db.refresh(order)
     return order

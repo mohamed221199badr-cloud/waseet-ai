@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.llm import client as llm
-from app.models_orders import ChatSession, Order, OrderException
+from app.models_orders import ChatSession, Order, OrderException, OrderStatusHistory
 from tests.test_intake import shop  # noqa: F401
 from tests.test_migrations import _alembic, scratch_url  # noqa: F401
 from tests.test_telegram import issue, say
@@ -39,7 +39,12 @@ def test_clear_order_goes_to_confirmation_then_draft(db_session, linked):
     done = say(db_session, 500, "تمام")
     assert "استلمنا طلبك" in done
     o = orders(db_session)[0]
-    assert o.status == "draft" and o.channel == "telegram" and len(o.items) == 2
+    # v3 F1: a clean order is submitted by the customer actor at creation time
+    assert o.status == "awaiting_confirmation" and o.channel == "telegram" and len(o.items) == 2
+    hist = db_session.scalars(select(OrderStatusHistory).where(
+        OrderStatusHistory.order_id == o.id)).all()
+    assert [(h.from_status, h.to_status, h.actor_type) for h in hist] == [
+        ("draft", "awaiting_confirmation", "customer")]
     assert db_session.scalar(select(func.count()).select_from(ChatSession)) == 0
 
 

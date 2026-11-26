@@ -476,6 +476,12 @@ def _create_order(db: Session, link: TelegramLink, cat: Catalog, lines: list[dic
                 candidates=[{"menu_item_id": c} for c in cands]))
     order.total = total
     db.flush()
+    # v3 F1: the customer submits their own order; with open exceptions it stays a draft
+    # for staff to resolve first
+    try:
+        orders_repo.submit(db, order, actor_type="customer")
+    except orders_repo.OrderStateError:
+        pass
     write_audit(db, business_id=link.business_id, entity="order", entity_id=str(order.id),
                 action="create", payload={"source": "menu_chat_agent", "channel": "telegram",
                                           "lines": len(lines), "exceptions": unresolved})

@@ -9,7 +9,7 @@ orders grows the B6 columns: delivery_attempts, payment_status, confirmed_total,
 requires_reconfirmation, assigned_driver_id.
 
 order_status_history records every transition with actor attribution (C2):
-actor_type 'user'/'system' requires actor_id, 'customer' requires it NULL.
+actor_type 'user' requires actor_id; 'system'/'customer' rows carry NULL.
 
 Revision ID: m010_orders
 Revises: m009_order_lines
@@ -63,9 +63,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("actor_type in ('user','system','customer')",
                            name="ck_osh_actor_type"),
-        sa.CheckConstraint("actor_type = 'customer' or actor_id is not null",
+        sa.CheckConstraint("actor_type <> 'user' or actor_id is not null",
                            name="ck_osh_named_actor"),
-        sa.CheckConstraint("actor_type <> 'customer' or actor_id is null",
+        sa.CheckConstraint("actor_type = 'user' or actor_id is null",
                            name="ck_osh_customer_unattributed"),
         sa.ForeignKeyConstraint(
             ["business_id", "order_id"], ["orders.business_id", "orders.id"],

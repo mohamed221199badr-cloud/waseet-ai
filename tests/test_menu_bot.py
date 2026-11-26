@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models_menu import MenuCategory, MenuItem, MenuItemVariant, PriceOverride
-from app.models_orders import Order, OrderItem, OrderLine
+from app.models_orders import Order, OrderItem, OrderLine, OrderStatusHistory
 from app.telegram import service as svc
 from tests.test_intake import shop  # noqa: F401
 from tests.test_migrations import _alembic, scratch_url  # noqa: F401
@@ -100,6 +100,12 @@ def test_single_variant_order_flow(db_session, linked, menu):  # noqa: F811
     assert lines[0].item_name == "كفتة حاتي" and lines[0].variant_name == "عادي"
     assert lines[0].unit_price == Decimal("420.00") and lines[0].price_source == "menu"
     assert db_session.scalar(select(OrderItem)) is None   # menu mode never writes order_items
+    # v3 F1: a clean menu order is submitted by the customer actor at creation time
+    assert order.status == "awaiting_confirmation"
+    hist = db_session.scalars(select(OrderStatusHistory).where(
+        OrderStatusHistory.order_id == order.id)).all()
+    assert [(h.from_status, h.to_status, h.actor_type) for h in hist] == [
+        ("draft", "awaiting_confirmation", "customer")]
 
 
 def test_multi_variant_asks_then_priced_from_db(db_session, linked, menu):  # noqa: F811

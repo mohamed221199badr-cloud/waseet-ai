@@ -407,16 +407,17 @@ class ChatSession(Base):
 
 
 class OrderStatusHistory(Base):
-    """Every order transition, with actor attribution (C2): 'user'/'system' rows name
-    the actor, 'customer' rows are attributed through orders.customer_id."""
+    """Every order transition, with actor attribution (C2): 'user' rows name the staff
+    actor; 'system' (automation) and 'customer' rows carry no user id — customer rows
+    are attributed through orders.customer_id."""
 
     __tablename__ = "order_status_history"
     __table_args__ = (
         CheckConstraint("actor_type in ('user','system','customer')",
                         name="ck_osh_actor_type"),
-        CheckConstraint("actor_type = 'customer' or actor_id is not null",
+        CheckConstraint("actor_type <> 'user' or actor_id is not null",
                         name="ck_osh_named_actor"),
-        CheckConstraint("actor_type <> 'customer' or actor_id is null",
+        CheckConstraint("actor_type = 'user' or actor_id is null",
                         name="ck_osh_customer_unattributed"),
         ForeignKeyConstraint(
             ["business_id", "order_id"], ["orders.business_id", "orders.id"],

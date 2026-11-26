@@ -355,6 +355,12 @@ def _create_order(db: Session, link: TelegramLink, lines: list[dict]) -> str:
                 customer_message=ln["raw"], quantity=ln.get("qty"),
                 candidates=[{"product_id": c} for c in cands]))
     db.flush()
+    # v3 F1: the customer submits their own order; with open exceptions it stays a draft
+    # for staff to resolve first
+    try:
+        orders_repo.submit(db, order, actor_type="customer")
+    except orders_repo.OrderStateError:
+        pass
     write_audit(db, business_id=link.business_id, entity="order", entity_id=str(order.id),
                 action="create", payload={"source": "chat_agent", "channel": "telegram",
                                           "lines": len(lines), "exceptions": unresolved})
