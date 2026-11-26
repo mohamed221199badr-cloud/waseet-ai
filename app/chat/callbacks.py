@@ -16,6 +16,7 @@ Actions:
     npb                       numpad backspace
     npc                       numpad confirm
     dv:<delivery|pickup>      onboarding: delivery vs pickup choice
+    sc:<category>:p<page>     search within this category (return point kept)
     cart                      cart review message
     cadd                      add another item (back to categories, keep draft)
     cok                       confirm the order (same as «تمام»)
@@ -58,7 +59,7 @@ def parse(data: str) -> Callback | None:
     action, args = parts[0], tuple(parts[1:])
     if action not in _ARITY or _ARITY[action] != len(args):
         return None
-    if action == "cat" and (not args[1].startswith("p") or not args[1][1:].isdigit()):
+    if action in ("cat", "sc") and (not args[1].startswith("p") or not args[1][1:].isdigit()):
         return None
     if action == "npd" and (len(args[0]) != 1 or not args[0].isdigit()):
         return None
@@ -72,7 +73,7 @@ def parse(data: str) -> Callback | None:
 
 
 _ARITY = {
-    "cats": 0, "cat": 2, "it": 1, "var": 1,
+    "cats": 0, "cat": 2, "sc": 2, "it": 1, "var": 1,
     "npd": 1, "npdot": 0, "npb": 0, "npc": 0, "dv": 1,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
     "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0,

@@ -10,6 +10,7 @@ Session ui state (inside ChatSession.draft["ui"]):
     screen: cats | items | item | qty | cart | clear_confirm
     category, page, item_id, variant_id: the current selection
     current_input: the in-chat numpad's pending quantity text (qty screen)
+    waiting_for_search_query, search_category, search_page: in-category search (F3)
     msg_id: the bot's last menu message, for edit-in-place navigation
 """
 
@@ -36,6 +37,8 @@ MSG_STALE = "الاختيار ده مش متاح دلوقتي. اختار من �
 MSG_CATS = "اختار من الأصناف:"
 MSG_CLEARED = "اتفضت السلة. نبدأ من الأول:"
 MSG_CART_EMPTY = "السلة فاضية لسه. اختار من الأصناف:"
+MSG_SEARCH_ASK = "🔍 اكتب اسم الصنف اللي بتدور عليه."
+MSG_SEARCH_NONE = "مفيش نتائج لـ «{query}» في قسم «{category}». جرب اسم تاني."
 MSG_PRICE_REQUIRED = (
     "«{item}» سعره بيتحدد مع الكاشير، فمش هقدر أضيفه من هنا. "
     "قوله في المحل أو اختار صنف تاني."
@@ -63,7 +66,7 @@ def in_flow(db: Session, link: TelegramLink) -> bool:
 def wants_text(db: Session, link: TelegramLink) -> bool:
     """True when the next text message is a custom quantity for this flow."""
     ui = _ui(_session(db, link))
-    return bool(ui and ui.get("await_qty"))
+    return bool(ui and (ui.get("await_qty") or ui.get("waiting_for_search_query")))
 
 
 def _save(db: Session, session: ChatSession, ui: dict) -> None:
@@ -137,6 +140,7 @@ def _items_rows(cat, category: str, page: int) -> tuple[list[list[tuple[str, str
         if page < total_pages - 1:
             nav.append(("التالي ▶", callbacks.build("cat", category, f"p{page + 1}")))
         rows.append(nav)
+    rows.append([("🔍 بحث عن صنف", callbacks.build("sc", category, f"p{page}"))])
     rows.append([("🔙 الأصناف", callbacks.build("cats"))])
     return rows, page, total_pages
 
@@ -268,7 +272,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         return "", []
 
     if cb.action in ("cats", "cadd"):
-        ui.update(screen="cats")
+        ui.update(screen="cats", waiting_for_search_query=False)
         _save(db, session, ui)
         return MSG_CATS, _cats_rows(db, link, lines)
 
@@ -277,9 +281,20 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         if not category_items(cat, category):
             return stale()
         rows, page, _ = _items_rows(cat, category, page)
-        ui.update(screen="items", category=category, page=page)
+        ui.update(screen="items", category=category, page=page,
+                  waiting_for_search_query=False)
         _save(db, session, ui)
         return f"أصناف «{category}»:", rows
+
+    if cb.action == "sc":
+        category, page = cb.args[0], int(cb.args[1][1:])
+        if not category_items(cat, category):
+            return stale()
+        ui.update(screen="search", search_category=category, search_page=page,
+                  waiting_for_search_query=True)
+        _save(db, session, ui)
+        return MSG_SEARCH_ASK, [[("🔙 رجوع للقسم",
+                                  callbacks.build("cat", category, f"p{page}"))]]
 
     if cb.action == "it":
         item_id = cb.args[0]
@@ -292,7 +307,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         category = ui.get("category", "")
         page = int(ui.get("page", 0))
         if len(variants) > 1:
-            ui.update(screen="item", item_id=item_id)
+            ui.update(screen="item", item_id=item_id, waiting_for_search_query=False)
             _save(db, session, ui)
             return (menu_agent.MSG_VARIANT.format(item=item.name),
                     _variants_rows(cat, item_id, category, page))
@@ -304,7 +319,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
                 _variants_rows(cat, item_id, category, page) if len(variants) > 1 else \
                 _items_rows(cat, category, page)[0]
         ui.update(screen="qty", item_id=item_id, variant_id=str(variant.id),
-                  current_input="")
+                  current_input="", waiting_for_search_query=False)
         _save(db, session, ui)
         return _qty_prompt(item, ""), _numpad_rows(item, item_id)
 
@@ -325,7 +340,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
                     _variants_rows(cat, item_id, ui.get("category", ""),
                                    int(ui.get("page", 0))))
         ui.update(screen="qty", item_id=item_id, variant_id=variant_id,
-                  current_input="")
+                  current_input="", waiting_for_search_query=False)
         _save(db, session, ui)
         return _qty_prompt(item, ""), _numpad_rows(item, item_id)
 
@@ -427,12 +442,58 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
 
 # ---------- custom-quantity text ----------
 
+SEARCH_MAX_RESULTS = 10
+
+
+def _search_items(cat, category: str, query: str):
+    """Category-scoped match on the normalized names (alef/ya/ta-marbuta/diacritics/
+    digits all unified by the existing engine). A query matches when every token
+    appears in the item name, or the whole query is a substring of it."""
+    from app.matching.normalize import normalize
+    q = normalize(query)
+    if not q:
+        return []
+    tokens = q.split()
+    out = []
+    for item in category_items(cat, category):  # the catalog holds available items only
+        name = normalize(item.name)
+        name_tokens = name.split()
+        if q in name or all(any(t in nt for nt in name_tokens) for t in tokens):
+            out.append(item)
+    return out
+
+
+def _handle_search(db: Session, session: ChatSession, ui: dict, cat, text: str):
+    category = ui.get("search_category") or ""
+    page = int(ui.get("search_page") or 0)
+    back = [[("🔙 رجوع للقسم", callbacks.build("cat", category, f"p{page}"))]]
+    query = text.strip()
+    if not query:
+        return MSG_SEARCH_ASK, back, ui.get("msg_id")
+    matches = _search_items(cat, category, query)
+    if not matches:
+        # stay in the search state so the next text retries
+        _save(db, session, ui)
+        return MSG_SEARCH_NONE.format(query=query[:100], category=category), back, \
+            ui.get("msg_id")
+    rows = [[(f"🔹 {i.name}", callbacks.build("it", i.id))]
+            for i in matches[:SEARCH_MAX_RESULTS]]
+    rows.append(back[0])
+    shown = f"نتائج البحث عن «{query[:100]}» في «{category}»:"
+    if len(matches) > SEARCH_MAX_RESULTS:
+        shown += f" (أول {SEARCH_MAX_RESULTS} من {len(matches)})"
+    _save(db, session, ui)
+    return shown, rows, ui.get("msg_id")
+
+
 def handle_text(db: Session, link: TelegramLink, text: str
                 ) -> tuple[str, list[list[tuple[str, str]]], int | None]:
     """A text message while await_qty is set: parse it as the custom quantity.
     Returns (text, rows, edit_id): edit_id is the stored menu message to edit."""
     cat = load_catalog(db, link.business_id)
     session, ui, lines = _ensure_session(db, link)
+    if ui.get("waiting_for_search_query"):
+        return _handle_search(db, session, ui, cat, text)
     item_id, variant_id = ui.get("item_id"), ui.get("variant_id")
     item = cat.items.get(item_id or "")
     variant = next((v for v in cat.variants.get(item_id or "", [])
