@@ -7,7 +7,7 @@ sold-out switch, PRICE_MANAGE for changing the price of an existing variant.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,7 @@ from app.audit import write_audit
 from app.db import get_db
 from app.menu_import import import_menu_csv
 from app.models import Business, User
+from app.models_menu import MenuItemImage
 from app.permissions import Permission as P
 from app.repositories import menu as repo
 from app.schemas_menu import (
@@ -366,3 +367,63 @@ def diff_report(
             rows.append(DiffRow(item=product.name, kind="only_in_products",
                                 menu_price=None, product_price=str(product.price)))
     return rows
+
+
+_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+_IMAGE_MAX = 5 * 1024 * 1024  # 5MB hard cap; import compresses to ~1MB anyway
+
+
+@router.put("/items/{item_id}/image", status_code=status.HTTP_204_NO_CONTENT)
+def put_item_image(
+    item_id: uuid.UUID,
+    file: UploadFile,
+    user: User = Depends(require(P.MENU_MANAGE)),
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_business),
+):
+    """Set the photo for one menu item (bytes in DB, his go 19677984)."""
+    _item_or_404(db, business.id, item_id)
+    if file.content_type not in _IMAGE_TYPES:
+        raise HTTPException(status_code=415, detail="Only jpg, png or webp images")
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > _IMAGE_MAX:
+        raise HTTPException(status_code=413, detail="Image larger than 5MB")
+    row = db.execute(
+        select(MenuItemImage).where(
+            MenuItemImage.business_id == business.id, MenuItemImage.item_id == item_id
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = MenuItemImage(
+            business_id=business.id, item_id=item_id,
+            image=data, content_type=file.content_type)
+        db.add(row)
+    else:
+        row.image = data
+        row.content_type = file.content_type
+        row.telegram_file_id = None  # old cached id points at the old photo
+    db.commit()
+    write_audit(db, business_id=business.id, actor_id=user.id, entity="menu_item",
+            entity_id=str(item_id), action="image_put", payload={
+        "bytes": len(data), "content_type": file.content_type})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/items/{item_id}/image")
+def get_item_image(
+    item_id: uuid.UUID,
+    _: User = Depends(require(P.MENU_MANAGE)),
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_business),
+):
+    """Serve the item photo for dashboard preview."""
+    row = db.execute(
+        select(MenuItemImage).where(
+            MenuItemImage.business_id == business.id, MenuItemImage.item_id == item_id
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No image for this item")
+    return Response(content=row.image, media_type=row.content_type)

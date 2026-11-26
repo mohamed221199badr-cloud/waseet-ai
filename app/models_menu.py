@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -202,4 +203,25 @@ class RestaurantSettings(Base):
     reconfirm_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=10)
     reconfirm_abs_egp: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=50)
     refund_limit_egp: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=100)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class MenuItemImage(Base):
+    """One photo per menu item (m013): bytes plus the cached Telegram file_id so
+    the bot uploads once and then resends by reference."""
+
+    __tablename__ = "menu_item_images"
+    __table_args__ = (
+        UniqueConstraint("business_id", "item_id", name="uq_item_image"),
+        ForeignKeyConstraint(
+            ["business_id", "item_id"], ["menu_items.business_id", "menu_items.id"],
+            ondelete="CASCADE", name="fk_item_image_same_business"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    image: Mapped[bytes] = mapped_column(LargeBinary)
+    content_type: Mapped[str] = mapped_column(String(50))
+    telegram_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
