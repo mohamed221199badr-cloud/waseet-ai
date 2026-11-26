@@ -259,7 +259,8 @@ def _finalize(db: Session, link: TelegramLink, session, ui: dict,
                          "has_address": bool(address)})
     legacy._clear(db, session)  # spec: clear the session draft on final confirm
     return _spec(MSG_DONE.format(oid=str(order.id)[:8]),
-                 rows=[[("🛒 طلب جديد", callbacks.build("cats"))]],
+                 rows=[[("✅ تمام، خلصت", callbacks.build("done"))],
+                       [("🛒 طلب جديد", callbacks.build("cats"))]],
                  remove_keyboard=True, edit_id=edit_id)
 
 

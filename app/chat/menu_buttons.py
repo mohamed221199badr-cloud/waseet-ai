@@ -575,6 +575,8 @@ MSG_MENU_PHOTO_OWNER_ONLY = "صورة المنيو الرسمية بيبعتها
 SHOP_ADDRESS = "الشرقية، مركز منيا القمح، منتصف شارع جمعية المحافظة على القرآن الكريم"
 SHOP_PHONES = ("01017597501", "01040756249")
 SHOP_WHATSAPP = "01553799899"
+MSG_FINISHED = ("شكراً ليك 🙏 طلبك عند الكاشير وهيتواصلوا معاك قريب.\n"
+                "لو عايز تطلب تاني دوس «طلب جديد».")
 MSG_CONTACT = (f"📞 تواصل معنا:\n"
                f"العنوان: {SHOP_ADDRESS}\n"
                f"تليفون: {' / '.join(SHOP_PHONES)}\n"
@@ -636,6 +638,9 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         ui["await_menu_image"] = True
         _save(db, session, ui)
         return MSG_ASK_MENU_IMAGE, [], None
+    if cb.action == "done":
+        # post-order "finish" button: a friendly close, keeps the new-order option
+        return MSG_FINISHED, [[("🛒 طلب جديد", callbacks.build("cats"))]], None
     text, rows = _navigate(db, link, cb, msg_id)
     if cb.action == "cat" and text == f"أصناف «{cb.args[0]}»:":
         # a category with an owner-uploaded page photo (m014) opens as one photo
