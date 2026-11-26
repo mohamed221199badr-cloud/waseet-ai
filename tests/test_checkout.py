@@ -71,7 +71,7 @@ def test_start_has_no_gate_for_new_customer(db_session, linked_new, menu):  # no
     assert "أهلاً وسهلاً" in rep.text
     labels = _flat(rep.button_rows)
     assert any("اللحوم" in lbl for lbl in labels)
-    assert "🔍 بحث" in labels and "🛒 السلة" in labels
+    assert "🔍 بحث" not in labels and "🛒 السلة" in labels
     assert rep.reply_keyboard is None
 
 
@@ -221,7 +221,7 @@ def test_empty_cart_confirm_does_not_start_checkout(db_session, linked, menu):  
 def test_global_search_from_main_menu(db_session, linked, menu):  # noqa: F811
     out = _say(db_session, "/start")
     rep = out[0]
-    assert "🔍 بحث" in _flat(rep.button_rows)
+    assert "🔍 بحث" not in _flat(rep.button_rows)  # removed from the welcome
     rep = tap(db_session, cb_codec.build("srch"))
     assert "اكتب اسم الصنف" in rep.text
     rep = _say(db_session, "مفروم")[0]

@@ -274,7 +274,7 @@ def test_start_shows_main_menu_directly(db_session, linked, menu):  # noqa: F811
     labels = _flat(rep.button_rows)
     # no onboarding gate (checkout spec 2026-11-26): categories + search + cart
     assert any("اللحوم" in lbl for lbl in labels)
-    assert "🔍 بحث" in labels and "🛒 السلة" in labels
+    assert "🔍 بحث" not in labels and "🛒 السلة" in labels
     assert "📋 عرض المنيو" not in labels
     assert "📍 العنوان" in labels and "📞 تواصل معنا" in labels
     assert rep.photo_file_id is None and "🖼 رفع صورة المنيو" not in labels  # customer
