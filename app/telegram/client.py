@@ -64,13 +64,29 @@ class TelegramClient:
         return {"inline_keyboard": [
             [{"text": label, "callback_data": data} for label, data in row] for row in rows]}
 
+    @staticmethod
+    def _reply_markup(reply_keyboard: list[list[dict]] | None,
+                      remove_keyboard: bool) -> dict | None:
+        """ReplyKeyboardMarkup payload for native inputs (contact share). Each row is
+        a list of KeyboardButton dicts, e.g. {"text": ..., "request_contact": True}.
+        remove_keyboard drops the temporary keyboard once collected."""
+        if remove_keyboard:
+            return {"remove_keyboard": True}
+        if reply_keyboard:
+            return {"keyboard": reply_keyboard, "resize_keyboard": True,
+                    "one_time_keyboard": True}
+        return None
+
     def send_message(self, chat_id: int, text: str,
                      buttons: list[tuple[str, str]] | None = None,
-                     button_rows: list[list[tuple[str, str]]] | None = None) -> int | None:
+                     button_rows: list[list[tuple[str, str]]] | None = None,
+                     reply_keyboard: list[list[dict]] | None = None,
+                     remove_keyboard: bool = False) -> int | None:
         """Sends and returns the new message_id (stored to edit the message later),
         or None when the API reply carried no message object."""
         params: dict = {"chat_id": chat_id, "text": text}
-        markup = self._markup(buttons, button_rows)
+        markup = (self._reply_markup(reply_keyboard, remove_keyboard)
+                  or self._markup(buttons, button_rows))
         if markup:
             params["reply_markup"] = markup
         result = self._call("sendMessage", **params)["result"]
@@ -143,7 +159,8 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
                             mid = rep.edit_message_id
                     if mid is None:  # no edit target or Telegram refused: send fresh
                         mid = client.send_message(
-                            rep.chat_id, rep.text, rep.buttons, rep.button_rows)
+                            rep.chat_id, rep.text, rep.buttons, rep.button_rows,
+                            rep.reply_keyboard, rep.remove_keyboard)
                     if rep.store_msg_id and mid is not None:
                         # the flow edits this message on the next tap; keep its id
                         db2 = session_factory()

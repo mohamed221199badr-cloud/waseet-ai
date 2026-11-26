@@ -30,6 +30,12 @@ def _agent_on(monkeypatch):
 @pytest.fixture()
 def linked(client, db_session, shop):  # noqa: F811
     say(db_session, 500, f"/start {issue(client, shop)}")
+    # complete the onboarding profile (F2): the shop customer already has a phone
+    from app.models_orders import Customer
+    cust = db_session.scalar(
+        select(Customer).where(Customer.business_id == shop["ids"]["a"]))
+    cust.delivery_method = "pickup"
+    db_session.commit()
     return shop
 
 

@@ -43,6 +43,8 @@ class Customer(Base):
     )
     name: Mapped[str] = mapped_column(String(200))
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # delivery vs pickup, collected once by onboarding (m013); NULL until asked
+    delivery_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     # auto-linked chats re-find their customer through this (survives /stop)

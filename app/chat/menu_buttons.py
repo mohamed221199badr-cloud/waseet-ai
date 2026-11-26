@@ -1,7 +1,7 @@
 """UI v1.8: fully button-driven menu ordering (menu mode only).
 
 Each screen is a function over (db, link) returning (text, button_rows). Button taps
-arrive as codec Callbacks; text arrives only while a custom quantity is awaited.
+arrive as codec Callbacks; quantities are entered on the in-chat numpad.
 Everything writes the SAME draft lines the text flow uses (draft kind "menu"), so
 confirmation and order creation stay in menu_agent - no duplicated business logic,
 no LLM anywhere in this flow.
@@ -9,7 +9,8 @@ no LLM anywhere in this flow.
 Session ui state (inside ChatSession.draft["ui"]):
     screen: cats | items | item | qty | cart | clear_confirm
     category, page, item_id, variant_id: the current selection
-    await_qty: True while a custom number is expected (next text message)
+    current_input: the in-chat numpad's pending quantity text (qty screen)
+    waiting_for_search_query, search_category, search_page: in-category search (F3)
     msg_id: the bot's last menu message, for edit-in-place navigation
 """
 
@@ -36,6 +37,8 @@ MSG_STALE = "الاختيار ده مش متاح دلوقتي. اختار من �
 MSG_CATS = "اختار من الأصناف:"
 MSG_CLEARED = "اتفضت السلة. نبدأ من الأول:"
 MSG_CART_EMPTY = "السلة فاضية لسه. اختار من الأصناف:"
+MSG_SEARCH_ASK = "🔍 اكتب اسم الصنف اللي بتدور عليه."
+MSG_SEARCH_NONE = "مفيش نتائج لـ «{query}» في قسم «{category}». جرب اسم تاني."
 MSG_PRICE_REQUIRED = (
     "«{item}» سعره بيتحدد مع الكاشير، فمش هقدر أضيفه من هنا. "
     "قوله في المحل أو اختار صنف تاني."
@@ -63,7 +66,7 @@ def in_flow(db: Session, link: TelegramLink) -> bool:
 def wants_text(db: Session, link: TelegramLink) -> bool:
     """True when the next text message is a custom quantity for this flow."""
     ui = _ui(_session(db, link))
-    return bool(ui and ui.get("await_qty"))
+    return bool(ui and (ui.get("await_qty") or ui.get("waiting_for_search_query")))
 
 
 def _save(db: Session, session: ChatSession, ui: dict) -> None:
@@ -137,6 +140,7 @@ def _items_rows(cat, category: str, page: int) -> tuple[list[list[tuple[str, str
         if page < total_pages - 1:
             nav.append(("التالي ▶", callbacks.build("cat", category, f"p{page + 1}")))
         rows.append(nav)
+    rows.append([("🔍 بحث عن صنف", callbacks.build("sc", category, f"p{page}"))])
     rows.append([("🔙 الأصناف", callbacks.build("cats"))])
     return rows, page, total_pages
 
@@ -151,17 +155,55 @@ def _variants_rows(cat, item_id: str, category: str, page: int) -> list[list[tup
     return rows
 
 
-def _qty_rows(item, item_id: str, variant_id: str) -> list[list[tuple[str, str]]]:
+def _numpad_rows(item, item_id: str) -> list[list[tuple[str, str]]]:
+    """Interactive in-chat numeric keypad (spec 19758722, feature 1).
+
+    Weight items get a decimal point (the only layout adjustment: the confirm row
+    moves down one). Unit items keep the original 3-button bottom row."""
+    rows = [[(str(n), callbacks.build("npd", n)) for n in chunk]
+            for chunk in ((1, 2, 3), (4, 5, 6), (7, 8, 9))]
     if item.sold_by == "weight":
-        quick = [("نص كيلو", 500), ("كيلو", 1000), ("كيلو ونص", 1500), ("٢ كيلو", 2000)]
-        row1 = [(label, callbacks.build("wq", g)) for label, g in quick[:2]]
-        row2 = [(label, callbacks.build("wq", g)) for label, g in quick[2:]]
+        rows.append([(".", callbacks.build("npdot")),
+                     ("0", callbacks.build("npd", 0)),
+                     ("⌫ مسح", callbacks.build("npb"))])
+        rows.append([("✅ تأكيد", callbacks.build("npc"))])
     else:
-        row1 = [(str(n), callbacks.build("uq", n)) for n in (1, 2, 3)]
-        row2 = [(str(n), callbacks.build("uq", n)) for n in (5, 10)]
-    custom = [("✍️ كمية تانية", callbacks.build("qcustom"))]
-    back = [("🔙 رجوع", callbacks.build("it", item_id))]
-    return [row1, row2, custom, back]
+        rows.append([("⌫ مسح", callbacks.build("npb")),
+                     ("0", callbacks.build("npd", 0)),
+                     ("✅ تأكيد", callbacks.build("npc"))])
+    rows.append([("🔙 رجوع", callbacks.build("it", item_id))])
+    return rows
+
+
+def _qty_prompt(item, current_input: str) -> str:
+    unit = "كيلو" if item.sold_by == "weight" else ""
+    shown = current_input if current_input else "…"
+    return (f"كام «{item.name}» عايز؟ {unit}".strip() + f":\n▫️ {shown}")
+
+
+def _qty_invalid(reason: str, item, item_id: str, current_input: str):
+    return (f"{reason}\n" + _qty_prompt(item, current_input),
+            _numpad_rows(item, item_id))
+
+
+def _parse_numpad_qty(item, raw: str) -> Decimal | None:
+    """Deterministic validation against the existing sold_by rules. None = invalid."""
+    if not raw or raw == ".":
+        return None
+    try:
+        qty = Decimal(raw)
+    except ArithmeticError:
+        return None
+    if qty <= 0 or qty > 100000:  # same bounds as menu_agent._apply_qty
+        return None
+    if item.sold_by == "weight":
+        if -qty.as_tuple().exponent > 3:  # Numeric(10, 3): max 3 decimal places
+            return None
+    elif qty != qty.to_integral_value():
+        return None  # unit items: whole numbers only
+    if item.min_quantity is not None and qty < item.min_quantity:
+        return None
+    return qty
 
 
 def _cart_text(db: Session, link: TelegramLink, cat, lines: list[dict]) -> str:
@@ -230,7 +272,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         return "", []
 
     if cb.action in ("cats", "cadd"):
-        ui.update(screen="cats")
+        ui.update(screen="cats", waiting_for_search_query=False)
         _save(db, session, ui)
         return MSG_CATS, _cats_rows(db, link, lines)
 
@@ -239,9 +281,20 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         if not category_items(cat, category):
             return stale()
         rows, page, _ = _items_rows(cat, category, page)
-        ui.update(screen="items", category=category, page=page)
+        ui.update(screen="items", category=category, page=page,
+                  waiting_for_search_query=False)
         _save(db, session, ui)
         return f"أصناف «{category}»:", rows
+
+    if cb.action == "sc":
+        category, page = cb.args[0], int(cb.args[1][1:])
+        if not category_items(cat, category):
+            return stale()
+        ui.update(screen="search", search_category=category, search_page=page,
+                  waiting_for_search_query=True)
+        _save(db, session, ui)
+        return MSG_SEARCH_ASK, [[("🔙 رجوع للقسم",
+                                  callbacks.build("cat", category, f"p{page}"))]]
 
     if cb.action == "it":
         item_id = cb.args[0]
@@ -254,7 +307,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         category = ui.get("category", "")
         page = int(ui.get("page", 0))
         if len(variants) > 1:
-            ui.update(screen="item", item_id=item_id)
+            ui.update(screen="item", item_id=item_id, waiting_for_search_query=False)
             _save(db, session, ui)
             return (menu_agent.MSG_VARIANT.format(item=item.name),
                     _variants_rows(cat, item_id, category, page))
@@ -265,11 +318,10 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
             return MSG_PRICE_REQUIRED.format(item=item.name), \
                 _variants_rows(cat, item_id, category, page) if len(variants) > 1 else \
                 _items_rows(cat, category, page)[0]
-        ui.update(screen="qty", item_id=item_id, variant_id=str(variant.id))
+        ui.update(screen="qty", item_id=item_id, variant_id=str(variant.id),
+                  current_input="", waiting_for_search_query=False)
         _save(db, session, ui)
-        unit = "كيلو" if item.sold_by == "weight" else ""
-        return (f"كام «{item.name}» عايز؟ {unit}".strip() + ":",
-                _qty_rows(item, item_id, str(variant.id)))
+        return _qty_prompt(item, ""), _numpad_rows(item, item_id)
 
     if cb.action == "var":
         # 64-byte budget: only the variant id travels; the item resolves through it
@@ -287,33 +339,62 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
             return (MSG_PRICE_REQUIRED.format(item=item.name),
                     _variants_rows(cat, item_id, ui.get("category", ""),
                                    int(ui.get("page", 0))))
-        ui.update(screen="qty", item_id=item_id, variant_id=variant_id)
+        ui.update(screen="qty", item_id=item_id, variant_id=variant_id,
+                  current_input="", waiting_for_search_query=False)
         _save(db, session, ui)
-        return f"كام «{item.name}» عايز؟:", _qty_rows(item, item_id, variant_id)
+        return _qty_prompt(item, ""), _numpad_rows(item, item_id)
 
-    if cb.action in ("wq", "uq"):
+    if cb.action in ("npd", "npdot", "npb", "npc"):
+        if ui.get("screen") != "qty":
+            return stale()  # repeated/late taps on an old keypad never add twice
         item_id, variant_id = ui.get("item_id"), ui.get("variant_id")
         item = cat.items.get(item_id or "")
         variant = next((v for v in cat.variants.get(item_id or "", [])
                         if str(v.id) == (variant_id or "")), None)
         if item is None or variant is None:
             return stale()
-        qty = Decimal(cb.args[0]) / 1000 if cb.action == "wq" else Decimal(cb.args[0])
-        lines.append({"raw": item.name[:200], "qty": float(qty), "item_id": item_id,
-                      "variant_id": variant_id, "candidates": [], "status": "ok",
-                      "reason": "button", "asked": 0})
-        ui.update(screen="cart")
+        current = ui.get("current_input") or ""
+        if cb.action == "npd":
+            if len(current) < 8:
+                current += cb.args[0]
+            stripped = current.lstrip("0")
+            if stripped.startswith("."):
+                stripped = "0" + stripped
+            current = stripped or ("0" if current else "")
+        elif cb.action == "npdot":
+            if item.sold_by == "weight" and "." not in current:
+                current = (current or "0") + "."
+            # unit items have no decimal button: a forged tap is ignored, keypad kept
+        elif cb.action == "npb":
+            current = current[:-1]
+        else:  # npc: confirm
+            qty = _parse_numpad_qty(item, current)
+            if qty is None:
+                reason = "اكتب الكمية الأول." if not current else "الكمية دي مش صح."
+                if current and item.sold_by == "unit":
+                    try:
+                        if Decimal(current) != Decimal(current).to_integral_value():
+                            reason = "الصنف ده بيتباع بالقطعة، اكتب رقم صحيح."
+                    except ArithmeticError:
+                        pass
+                if current and item.min_quantity is not None:
+                    try:
+                        if Decimal(current) > 0 and Decimal(current) < item.min_quantity:
+                            reason = f"أقل كمية {menu_agent._money(item.min_quantity)}."
+                    except ArithmeticError:
+                        pass
+                ui["current_input"] = current
+                _save(db, session, ui)
+                return _qty_invalid(reason, item, item_id, current)
+            lines.append({"raw": item.name[:200], "qty": float(qty), "item_id": item_id,
+                          "variant_id": variant_id, "candidates": [], "status": "ok",
+                          "reason": "button", "asked": 0})
+            ui.update(screen="cart", current_input="")
+            _save(db, session, ui)
+            return _cart_text(db, link, cat, lines), _cart_rows()
+        ui["current_input"] = current
         _save(db, session, ui)
-        return _cart_text(db, link, cat, lines), _cart_rows()
-
-    if cb.action == "qcustom":
-        item = cat.items.get(ui.get("item_id") or "")
-        if item is None:
-            return stale()
-        ui["await_qty"] = True
-        _save(db, session, ui)
-        unit = "بالكيلو (مثال: 2.5)" if item.sold_by == "weight" else "(مثال: 3)"
-        return f"اكتب الكمية {unit}:", []
+        return _qty_prompt(item, current), _numpad_rows(item, item_id)
 
     if cb.action == "cart":
         ui.update(screen="cart")
@@ -361,12 +442,58 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
 
 # ---------- custom-quantity text ----------
 
+SEARCH_MAX_RESULTS = 10
+
+
+def _search_items(cat, category: str, query: str):
+    """Category-scoped match on the normalized names (alef/ya/ta-marbuta/diacritics/
+    digits all unified by the existing engine). A query matches when every token
+    appears in the item name, or the whole query is a substring of it."""
+    from app.matching.normalize import normalize
+    q = normalize(query)
+    if not q:
+        return []
+    tokens = q.split()
+    out = []
+    for item in category_items(cat, category):  # the catalog holds available items only
+        name = normalize(item.name)
+        name_tokens = name.split()
+        if q in name or all(any(t in nt for nt in name_tokens) for t in tokens):
+            out.append(item)
+    return out
+
+
+def _handle_search(db: Session, session: ChatSession, ui: dict, cat, text: str):
+    category = ui.get("search_category") or ""
+    page = int(ui.get("search_page") or 0)
+    back = [[("🔙 رجوع للقسم", callbacks.build("cat", category, f"p{page}"))]]
+    query = text.strip()
+    if not query:
+        return MSG_SEARCH_ASK, back, ui.get("msg_id")
+    matches = _search_items(cat, category, query)
+    if not matches:
+        # stay in the search state so the next text retries
+        _save(db, session, ui)
+        return MSG_SEARCH_NONE.format(query=query[:100], category=category), back, \
+            ui.get("msg_id")
+    rows = [[(f"🔹 {i.name}", callbacks.build("it", i.id))]
+            for i in matches[:SEARCH_MAX_RESULTS]]
+    rows.append(back[0])
+    shown = f"نتائج البحث عن «{query[:100]}» في «{category}»:"
+    if len(matches) > SEARCH_MAX_RESULTS:
+        shown += f" (أول {SEARCH_MAX_RESULTS} من {len(matches)})"
+    _save(db, session, ui)
+    return shown, rows, ui.get("msg_id")
+
+
 def handle_text(db: Session, link: TelegramLink, text: str
                 ) -> tuple[str, list[list[tuple[str, str]]], int | None]:
     """A text message while await_qty is set: parse it as the custom quantity.
     Returns (text, rows, edit_id): edit_id is the stored menu message to edit."""
     cat = load_catalog(db, link.business_id)
     session, ui, lines = _ensure_session(db, link)
+    if ui.get("waiting_for_search_query"):
+        return _handle_search(db, session, ui, cat, text)
     item_id, variant_id = ui.get("item_id"), ui.get("variant_id")
     item = cat.items.get(item_id or "")
     variant = next((v for v in cat.variants.get(item_id or "", [])

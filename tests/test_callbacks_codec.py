@@ -12,9 +12,10 @@ def test_roundtrip_all_actions():
         ("cat", ("اللحوم", "p2"), "cat:اللحوم:p2"),
         ("it", (str(iid),), f"it:{iid}"),
         ("var", (str(vid),), f"var:{vid}"),
-        ("wq", ("500",), "wq:500"),
-        ("uq", ("3",), "uq:3"),
-        ("qcustom", (), "qcustom"),
+        ("npd", ("7",), "npd:7"),
+        ("npdot", (), "npdot"),
+        ("npb", (), "npb"),
+        ("npc", (), "npc"),
         ("cart", (), "cart"),
         ("cadd", (), "cadd"),
         ("cok", (), "cok"),
@@ -39,8 +40,9 @@ def test_parse_rejects_malformed():
     assert parse("cat:اللحوم") is None               # missing page
     assert parse("cat:اللحوم:2") is None             # page must be p<n>
     assert parse("cat:اللحوم:px") is None
-    assert parse("wq:abc") is None                   # quantities are digits
-    assert parse("uq:2.5") is None
+    assert parse("npd:12") is None                   # one digit per tap
+    assert parse("npd:x") is None
+    assert parse("npdot:1") is None
     assert parse("it:not-a-uuid") is None
     assert parse(f"var:{uuid.uuid4()}:nope") is None
     assert parse("cok:extra") is None
