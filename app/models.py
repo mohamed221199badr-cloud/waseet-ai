@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     ForeignKey,
     ForeignKeyConstraint,
     Numeric,
@@ -24,6 +25,10 @@ class Business(Base):
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(100), unique=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    # UI v1.8 3.0: the shop's official menu photo, as a Telegram file_id reference
+    menu_photo_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    menu_photo_uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    menu_photo_uploaded_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     users: Mapped[list["User"]] = relationship(back_populates="business")
     products: Mapped[list["Product"]] = relationship(back_populates="business")

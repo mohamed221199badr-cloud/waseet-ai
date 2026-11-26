@@ -40,9 +40,7 @@ CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
 CODE_LENGTH = 10
 MAX_TEXT = 5000
 
-MSG_NOT_LINKED = (
-    "الحساب ده مش مربوط بأي محل. اطلب من المحل كود ربط وابعته هنا بالشكل ده: /start الكود"
-)
+MSG_NOT_LINKED = "البوت مش متاح للحساب ده دلوقتي. كلّم المحل مباشرة."
 MSG_BAD_CODE = "الكود غير صحيح أو منتهي أو اتستخدم قبل كده. اطلب كود جديد من المحل."
 MSG_HELP = (
     "ابعت طلبك سطر لكل منتج، مثال:\n١ كيلو مفروم حواوشي\n٢ كيلو كفتة حاتي\n"
@@ -50,7 +48,7 @@ MSG_HELP = (
 )
 MSG_LINKED = "تم ربط الحساب. تقدر تبعت طلبك دلوقتي، سطر لكل منتج."
 MSG_ALREADY_LINKED = "الحساب ده مربوط بالفعل. ابعت /stop الأول لو عايز تربطه بكود تاني."
-MSG_UNLINKED = "تم فصل الحساب. مش هنستقبل طلبات منه لحد ما تربطه بكود جديد."
+MSG_UNLINKED = "تم فصل الحساب. ابعت أي رسالة لو عايز تطلب تاني."
 MSG_INACTIVE = "الحساب ده متوقف عند المحل. كلّم المحل مباشرة."
 MSG_TOO_LONG = "الرسالة طويلة جدًا. قسّمها لرسائل أقصر."
 MSG_NO_LINES = "ما لقيتش بنود في الرسالة. اكتب سطر لكل منتج، مثال: ١ كيلو مفروم حواوشي"
@@ -67,6 +65,7 @@ class Reply:
     button_rows: list[list[tuple[str, str]]] | None = None
     edit_message_id: int | None = None             # bot message to edit instead of sending
     store_msg_id: bool = False                     # worker persists the resulting message id
+    photo_file_id: str | None = None               # send this Telegram photo reference
 
 # Pinned callback_data format (slice A, no LLM). Every value matches this whitelist and is
 # validated against the linked business's own data before it does anything:
@@ -101,8 +100,6 @@ def new_link_code(db: Session, business_id, customer_id) -> tuple[str, TelegramL
 
 
 def _redeem(db: Session, chat_id: int, code: str) -> str:
-    if db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id)) is not None:
-        return MSG_ALREADY_LINKED
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     row = db.scalar(
         select(TelegramLinkCode)
@@ -119,12 +116,71 @@ def _redeem(db: Session, chat_id: int, code: str) -> str:
     if customer is None or not customer.is_active:
         return MSG_BAD_CODE
     row.used_at = now
-    db.add(TelegramLink(business_id=row.business_id, customer_id=row.customer_id, chat_id=chat_id))
+    existing = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+    if existing is not None:
+        # auto-linked chats re-point to the code's named customer (price overrides
+        # live there); the named customer adopts the chat so a later /stop re-finds it
+        action, entity_id = "move", str(existing.customer_id)
+        db.delete(existing)
+        db.flush()
+    else:
+        action, entity_id = "create", str(row.customer_id)
+    if customer.telegram_chat_id != chat_id:
+        # one chat maps to one customer: drop the id from its previous holder
+        # (the auto-created row) so the code's named customer can adopt it
+        prev = db.scalar(select(Customer).where(
+            Customer.business_id == row.business_id,
+            Customer.telegram_chat_id == chat_id))
+        if prev is not None:
+            prev.telegram_chat_id = None
+            db.add(prev)
+            db.flush()
+        customer.telegram_chat_id = chat_id
+        db.add(customer)
+    db.add(TelegramLink(business_id=row.business_id, customer_id=row.customer_id,
+                        chat_id=chat_id))
     write_audit(
-        db, business_id=row.business_id, entity="telegram_link", entity_id=str(row.customer_id),
-        action="create", payload={"customer_id": str(row.customer_id)},
+        db, business_id=row.business_id, entity="telegram_link", entity_id=entity_id,
+        action=action, payload={"customer_id": str(row.customer_id)},
     )
     return MSG_LINKED
+
+
+def _menu_business(db: Session):
+    """The single business this bot serves: the unique business that has a menu.
+    None when zero or several qualify - auto-link stays off and codes are needed."""
+    from app.models import Business
+    candidates = [b for b in db.scalars(select(Business)).all()
+                  if menu_catalog.has_menu(db, b.id)]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _auto_link(db: Session, chat_id: int, sender: dict) -> TelegramLink | None:
+    """Find-or-create the customer for an unlinked chat on the single menu business,
+    and link it. A deactivated customer is never re-activated (the owner's kill
+    switch for abuse). Returns None when auto-link is off or the customer is off."""
+    business = _menu_business(db)
+    if business is None:
+        return None
+    customer = db.scalar(select(Customer).where(
+        Customer.business_id == business.id, Customer.telegram_chat_id == chat_id))
+    if customer is None:
+        name = (sender.get("first_name") or sender.get("username")
+                or f"عميل {chat_id}")
+        customer = Customer(business_id=business.id, name=str(name)[:200],
+                            telegram_chat_id=chat_id)
+        db.add(customer)
+        db.flush()
+    if not customer.is_active:
+        return None
+    link = TelegramLink(business_id=business.id, customer_id=customer.id,
+                        chat_id=chat_id)
+    db.add(link)
+    write_audit(db, business_id=business.id, entity="telegram_link",
+                entity_id=str(customer.id), action="create",
+                payload={"customer_id": str(customer.id), "by": "auto"})
+    db.flush()
+    return link
 
 
 def _order_reply(order, results) -> str:
@@ -183,6 +239,15 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
             or sender.get("is_bot") or not isinstance(data, str)):
         return None, None, None
     link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+    if link is None and settings.chat_agent_enabled:
+        link = _auto_link(db, chat_id, sender)
+        if link is not None:
+            # first contact is a tap: answer with the welcome screen, fresh message
+            text, rows = menu_buttons.welcome(db, link)
+            rep = Reply(chat_id, text, answer_callback_id=cq.get("id"),
+                        store_msg_id=True)
+            rep.button_rows = rows
+            return chat_id, None, rep
     parsed = cb_codec.parse(data)
     if parsed is not None:
         # UI v1.8 codec: menu-mode businesses only. A legacy-products business never
@@ -193,11 +258,11 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
         if not menu_catalog.has_menu(db, link.business_id):
             return chat_id, None, Reply(chat_id, "", answer_callback_id=cq.get("id"))
         msg_id = msg.get("message_id")
-        text, rows = menu_buttons.handle_callback(
+        text, rows, photo = menu_buttons.handle_callback(
             db, link, parsed, msg_id if isinstance(msg_id, int) else None)
         rep = Reply(chat_id, text, answer_callback_id=cq.get("id"),
                     edit_message_id=msg_id if isinstance(msg_id, int) else None,
-                    store_msg_id=True)
+                    store_msg_id=True, photo_file_id=photo)
         if rows:
             rep.button_rows = rows
         return chat_id, None, rep
@@ -252,7 +317,35 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     chat, sender, text = msg.get("chat") or {}, msg.get("from") or {}, msg.get("text")
     chat_id = chat.get("id")
     if (chat.get("type") != "private" or not isinstance(chat_id, int)
-            or sender.get("is_bot") or not isinstance(text, str) or not text.strip()):
+            or sender.get("is_bot")):
+        return []
+    if not (isinstance(text, str) and text.strip()):
+        # UI v1.8 3.0B: a photo is meaningful only while the customer was asked for
+        # a menu image; anything else non-text is ignored (spec: never ask otherwise)
+        photos = msg.get("photo")
+        if isinstance(photos, list) and photos:
+            link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+            if (link is not None and settings.chat_agent_enabled
+                    and menu_catalog.has_menu(db, link.business_id)
+                    and menu_buttons.wants_photo(db, link)):
+                inserted = db.execute(
+                    pg_insert(TelegramUpdate).values(update_id=update_id)
+                    .on_conflict_do_nothing().returning(TelegramUpdate.update_id)
+                ).first()
+                if inserted is None:
+                    db.rollback()
+                    return []
+                biggest = max(photos, key=lambda p: (p.get("file_size") or 0,
+                                                     p.get("width") or 0))
+                file_id = biggest.get("file_id")
+                if not isinstance(file_id, str) or not file_id:
+                    return []
+                out, rows = menu_buttons.handle_photo(db, link, file_id)
+                db.commit()
+                rep = Reply(chat_id, out, store_msg_id=True)
+                if rows:
+                    rep.button_rows = rows
+                return [rep]
         return []
     # Redelivered update: do nothing. Same transaction as the work, so a crash retries cleanly.
     inserted = db.execute(
@@ -268,8 +361,24 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     cmd = cmd.split("@")[0].lower()  # "/start@MyBot"
     link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
 
+    _fresh_auto_link = False
+    if link is None and settings.chat_agent_enabled:
+        # unlinked chat on the single-shop bot: auto-link to the menu business and
+        # enter through the welcome screen (19672361); codes and /stop still work
+        link = _auto_link(db, chat_id, sender)
+        _fresh_auto_link = link is not None
     if cmd == "/start":
-        reply = _redeem(db, chat_id, arg) if arg.strip() else (MSG_HELP if link else MSG_NOT_LINKED)
+        if arg.strip():
+            reply = _redeem(db, chat_id, arg)
+        elif link is not None and menu_catalog.has_menu(db, link.business_id):
+            # UI v1.8 3.0A: the welcome screen is the menu-mode entry point
+            text_out, rows = menu_buttons.welcome(db, link)
+            db.commit()
+            rep = Reply(chat_id, text_out, store_msg_id=True)
+            rep.button_rows = rows
+            return [rep]
+        else:
+            reply = MSG_HELP if link else MSG_NOT_LINKED
     elif cmd == "/help":
         reply = MSG_HELP if link else MSG_NOT_LINKED
     elif cmd == "/stop":
@@ -283,10 +392,16 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
             )
             reply = MSG_UNLINKED
     elif link is None:
-        reply = MSG_NOT_LINKED
+        reply = MSG_NOT_LINKED  # auto-link off (no unique menu business) or customer off
     elif cmd.startswith("/"):
         reply = MSG_HELP
     elif settings.chat_agent_enabled:
+        if link is not None and _fresh_auto_link:
+            text_out, rows = menu_buttons.welcome(db, link)
+            db.commit()
+            rep = Reply(chat_id, text_out, store_msg_id=True)
+            rep.button_rows = rows
+            return [rep]
         if menu_catalog.has_menu(db, link.business_id):
             if menu_buttons.wants_text(db, link):
                 # UI v1.8 custom-quantity state: this text is a number for the flow
