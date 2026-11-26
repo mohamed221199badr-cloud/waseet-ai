@@ -290,7 +290,10 @@ def test_photo_without_waiting_state_ignored(db_session, linked, menu):  # noqa:
     assert biz.menu_photo_file_id is None
 
 
-def test_contact_button_replies_with_placeholder(db_session, linked, menu):  # noqa: F811
+def test_contact_button_shows_shop_details(db_session, linked, menu):  # noqa: F811
     rep = tap(db_session, cb_codec.build("contact"))
-    assert "للتواصل" in rep.text
+    assert "تواصل معنا" in rep.text
+    assert "01017597501" in rep.text and "01040756249" in rep.text
+    assert "01553799899" in rep.text
+    assert "منيا القمح" in rep.text
     assert "🔙 رجوع" in _flat(rep.button_rows)

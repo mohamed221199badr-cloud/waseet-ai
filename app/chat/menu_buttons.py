@@ -404,8 +404,15 @@ MSG_WELCOME = ("أهلاً وسهلاً بيك ❤️\n"
 MSG_ASK_MENU_IMAGE = ("تحب تبعتلنا صورة المنيو؟ 📸\n"
                       "ابعت صورة المنيو هنا علشان نقدر نساعدك في اختيار طلبك.")
 MSG_MENU_IMAGE_SAVED = "وصلتنا صورة المنيو، شكراً ليك ❤️"
-# no contact info is stored for the business yet; flagged to the owner
-MSG_CONTACT = "📞 للتواصل مع المحل: كلّم المحل مباشرة."
+# shop contact details confirmed by the owner (message 19667742); constants until
+# a business-settings surface exists
+SHOP_ADDRESS = "الشرقية، مركز منيا القمح، منتصف شارع جمعية المحافظة على القرآن الكريم"
+SHOP_PHONES = ("01017597501", "01040756249")
+SHOP_WHATSAPP = "01553799899"
+MSG_CONTACT = (f"📞 تواصل معنا:\n"
+               f"العنوان: {SHOP_ADDRESS}\n"
+               f"تليفون: {' / '.join(SHOP_PHONES)}\n"
+               f"واتساب: {SHOP_WHATSAPP}")
 
 
 def welcome(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, str]]]]:
