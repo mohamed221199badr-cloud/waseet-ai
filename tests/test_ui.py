@@ -51,8 +51,6 @@ def test_client_errors(client, shop, api):  # noqa: F811
     with pytest.raises(api_client.ApiError) as ei:
         api_client.ApiClient(BASE, http=client).login("test-biz-a", "a@test.local", "wrong")
     assert ei.value.status == 401
-    code = api.new_link_code(shop["c"]["id"])
-    assert len(code["code"]) == 10
     assert api.links() == []
 
 
@@ -134,13 +132,3 @@ def test_screen_resolve_with_candidate(client, shop, monkeypatch):  # noqa: F811
     o = client.get(f"/api/v1/orders/{order['id']}", headers=shop["h"]).json()
     assert len(o["items"]) == 1 and o["items"][0]["quantity"] == 3
     assert o["exceptions"][0]["status"] == "resolved"
-
-
-def test_screen_telegram_code(client, shop, monkeypatch):  # noqa: F811
-    patch_client(monkeypatch, client)
-    at = login(AppTest.from_file(APP, default_timeout=30).run())
-    at.sidebar.radio[0].set_value("تيليجرام").run()
-    at.selectbox[0].select_index(0).run()
-    [b for b in at.button if b.label == "إنشاء كود"][0].click()
-    at.run()
-    assert not at.exception and any("/start " in c.value for c in at.code)

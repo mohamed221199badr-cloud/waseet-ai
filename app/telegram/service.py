@@ -13,11 +13,8 @@ Security rules:
 - Orders created here are drafts. Confirmation stays with the owner.
 """
 
-import hashlib
 import re as _re
-import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -31,22 +28,17 @@ from app.config import settings
 from app.models_orders import (
     Customer,
     TelegramLink,
-    TelegramLinkCode,
     TelegramUpdate,
 )
 from app.repositories import intake as intake_repo
 
-CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
-CODE_LENGTH = 10
 MAX_TEXT = 5000
 
 MSG_NOT_LINKED = "البوت مش متاح للحساب ده دلوقتي. كلّم المحل مباشرة."
-MSG_BAD_CODE = "الكود غير صحيح أو منتهي أو اتستخدم قبل كده. اطلب كود جديد من المحل."
 MSG_HELP = (
     "ابعت طلبك سطر لكل منتج، مثال:\n١ كيلو مفروم حواوشي\n٢ كيلو كفتة حاتي\n"
     "المحل هيراجع الطلب ويعتمده.\n/stop لفصل الحساب ده عن المحل."
 )
-MSG_LINKED = "تم ربط الحساب. تقدر تبعت طلبك دلوقتي، سطر لكل منتج."
 MSG_ALREADY_LINKED = "الحساب ده مربوط بالفعل. ابعت /stop الأول لو عايز تربطه بكود تاني."
 MSG_UNLINKED = "تم فصل الحساب. ابعت أي رسالة لو عايز تطلب تاني."
 MSG_INACTIVE = "الحساب ده متوقف عند المحل. كلّم المحل مباشرة."
@@ -97,69 +89,6 @@ def _checkout_reply(chat_id: int, spec: dict,
 _CALLBACK_WHITELIST = _re.compile(
     r"^(cat_[A-Z]{2,5}|buy_[0-9a-fA-F-]{36}|pick_([0-9a-fA-F-]{36}|none)"
     r"|view_cart|cart_confirm|cart_cancel|list_products)$")
-
-
-def hash_code(code: str) -> str:
-    return hashlib.sha256(code.strip().upper().encode()).hexdigest()
-
-
-def new_link_code(db: Session, business_id, customer_id) -> tuple[str, TelegramLinkCode]:
-    code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
-    row = TelegramLinkCode(
-        business_id=business_id, customer_id=customer_id, code_hash=hash_code(code),
-        expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
-        + timedelta(hours=settings.telegram_link_code_ttl_hours),
-    )
-    db.add(row)
-    db.flush()
-    return code, row
-
-
-def _redeem(db: Session, chat_id: int, code: str) -> str:
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    row = db.scalar(
-        select(TelegramLinkCode)
-        .where(TelegramLinkCode.code_hash == hash_code(code))
-        .with_for_update()
-    )
-    if row is None or row.used_at is not None or row.expires_at < now:
-        return MSG_BAD_CODE
-    customer = db.scalar(
-        select(Customer).where(
-            Customer.business_id == row.business_id, Customer.id == row.customer_id
-        )
-    )
-    if customer is None or not customer.is_active:
-        return MSG_BAD_CODE
-    row.used_at = now
-    existing = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
-    if existing is not None:
-        # auto-linked chats re-point to the code's named customer (price overrides
-        # live there); the named customer adopts the chat so a later /stop re-finds it
-        action, entity_id = "move", str(existing.customer_id)
-        db.delete(existing)
-        db.flush()
-    else:
-        action, entity_id = "create", str(row.customer_id)
-    if customer.telegram_chat_id != chat_id:
-        # one chat maps to one customer: drop the id from its previous holder
-        # (the auto-created row) so the code's named customer can adopt it
-        prev = db.scalar(select(Customer).where(
-            Customer.business_id == row.business_id,
-            Customer.telegram_chat_id == chat_id))
-        if prev is not None:
-            prev.telegram_chat_id = None
-            db.add(prev)
-            db.flush()
-        customer.telegram_chat_id = chat_id
-        db.add(customer)
-    db.add(TelegramLink(business_id=row.business_id, customer_id=row.customer_id,
-                        chat_id=chat_id))
-    write_audit(
-        db, business_id=row.business_id, entity="telegram_link", entity_id=entity_id,
-        action=action, payload={"customer_id": str(row.customer_id)},
-    )
-    return MSG_LINKED
 
 
 def _menu_business(db: Session):
@@ -416,9 +345,8 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         link = _auto_link(db, chat_id, sender)
         _fresh_auto_link = link is not None
     if cmd == "/start":
-        if arg.strip():
-            reply = _redeem(db, chat_id, arg)
-        elif link is not None and menu_catalog.has_menu(db, link.business_id):
+        # "/start <anything>" (old link codes) is ignored: same welcome as plain /start
+        if link is not None and menu_catalog.has_menu(db, link.business_id):
             # no onboarding gate (checkout spec 2026-11-26): the main menu directly
             text_out, rows = menu_buttons.main_menu(db, link)
             db.commit()

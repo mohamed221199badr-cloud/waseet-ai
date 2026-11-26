@@ -15,7 +15,7 @@ from app.models_orders import Order
 from app.telegram import service as svc
 from tests.test_intake import shop  # noqa: F401
 from tests.test_migrations import _alembic, scratch_url  # noqa: F401
-from tests.test_telegram import issue, say, upd
+from tests.test_telegram import link, upd
 
 _ids = itertools.count(90000)
 
@@ -28,7 +28,7 @@ def _agent_on(monkeypatch):
 
 @pytest.fixture()
 def linked(client, db_session, shop):  # noqa: F811
-    say(db_session, 500, f"/start {issue(client, shop)}")
+    link(db_session, 500, shop)
     return shop
 
 

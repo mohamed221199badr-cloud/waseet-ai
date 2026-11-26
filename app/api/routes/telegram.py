@@ -12,36 +12,9 @@ from app.db import get_db
 from app.models import Business, User
 from app.models_orders import Customer, TelegramLink
 from app.permissions import Permission as P
-from app.repositories import customers as customers_repo
-from app.schemas_telegram import LinkCodeCreate, LinkCodeRead, TelegramLinkRead
-from app.telegram.service import new_link_code
+from app.schemas_telegram import TelegramLinkRead
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
-
-
-@router.post("/link-codes", response_model=LinkCodeRead, status_code=status.HTTP_201_CREATED)
-def create_link_code(
-    body: LinkCodeCreate,
-    _: None = Depends(require(P.CRM_MANAGE)),
-    business: Business = Depends(get_business),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    customer = customers_repo.get_customer(db, business.id, body.customer_id)
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    if not customer.is_active:
-        raise HTTPException(status_code=409, detail="Customer is inactive")
-    code, row = new_link_code(db, business.id, customer.id)
-    write_audit(
-        db, business_id=business.id, actor_id=user.id, entity="telegram_link_code",
-        entity_id=str(row.id), action="create", payload={"customer_id": str(customer.id)},
-    )
-    db.commit()
-    return LinkCodeRead(
-        code=code, expires_at=row.expires_at,
-        instruction=f"العميل يبعت للبوت: /start {code}",
-    )
 
 
 @router.get("/links", response_model=list[TelegramLinkRead])

@@ -136,8 +136,7 @@ export TELEGRAM_BOT_TOKEN='التوكن-من-BotFather'   # متكتبوش في 
 python -m app.telegram.client                      # polling، من غير domain ولا webhook
 ```
 
-**ربط عميل:** المالك يعمل كود من شاشة "تيليجرام" (أو `POST /api/v1/telegram/link-codes`).
-العميل يبعت للبوت `/start الكود`. الكود يشتغل مرة واحدة وينتهي بعد 24 ساعة. بعد كده أي رسالة من
+**ربط عميل:** تلقائي. العميل يفتح البوت ويدوس /start وبيتربط لوحده (كودات الربط القديمة اتشالت). بعد كده أي رسالة من
 الشات ده بتتحول لمسودة طلب (`channel=telegram`) باسم العميل ده في شركته بس. `/stop` يفصل الشات.
 `GET /api/v1/telegram/links` و `DELETE /api/v1/telegram/links/{id}` للمالك.
 
