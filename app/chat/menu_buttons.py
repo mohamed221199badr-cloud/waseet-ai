@@ -102,8 +102,19 @@ def _ok_lines(lines: list[dict]) -> list[dict]:
 
 # ---------- screens ----------
 
+_CATEGORY_EMOJI = {
+    "لحم": "🥩", "لحوم": "🥩", "ضاني": "🐑", "فراخ": "🍗", "برجر": "🍔",
+    "حلو": "🍬", "خدمات": "🛠", "مصنعات": "🌭", "قطع": "🥩",
+}
+
+
+def _category_emoji(name: str) -> str:
+    return next((e for key, e in _CATEGORY_EMOJI.items() if key in name), "🍽")
+
+
 def _cats_rows(db: Session, link: TelegramLink, lines: list[dict]) -> list[list[tuple[str, str]]]:
-    rows = [[(c.name, callbacks.build("cat", c.name, "p0"))]
+    rows = [[(f"{_category_emoji(c.name)} {c.name}",
+              callbacks.build("cat", c.name, "p0"))]
             for c in list_categories(db, link.business_id)]
     if _ok_lines(lines):
         rows.append([("🛒 السلة", callbacks.build("cart"))])
@@ -116,7 +127,7 @@ def _items_rows(cat, category: str, page: int) -> tuple[list[list[tuple[str, str
     page = max(0, min(page, total_pages - 1))
     chunk = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     rows: list[list[tuple[str, str]]] = [
-        [(f"{i.name}", callbacks.build("it", i.id))] for i in chunk
+        [(f"🔹 {i.name}", callbacks.build("it", i.id))] for i in chunk
     ]
     if total_pages > 1:
         nav = []
@@ -404,6 +415,8 @@ MSG_WELCOME = ("أهلاً وسهلاً بيك ❤️\n"
 MSG_ASK_MENU_IMAGE = ("تحب تبعتلنا صورة المنيو؟ 📸\n"
                       "ابعت صورة المنيو هنا علشان نقدر نساعدك في اختيار طلبك.")
 MSG_MENU_IMAGE_SAVED = "وصلتنا صورة المنيو، شكراً ليك ❤️"
+MSG_MENU_SOON = "المنيو هيتاح هنا قريب، جرب تاني بعد شوية."
+MSG_MENU_PHOTO_OWNER_ONLY = "صورة المنيو الرسمية بيبعتها صاحب المحل بس."
 # shop contact details confirmed by the owner (message 19667742); constants until
 # a business-settings surface exists
 SHOP_ADDRESS = "الشرقية، مركز منيا القمح، منتصف شارع جمعية المحافظة على القرآن الكريم"
@@ -446,6 +459,11 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
             ui["await_menu_image"] = False
             _save(db, session, ui)
             return "", [[("🛒 ابدأ الطلب", callbacks.build("cats"))]], file_id
+        if not link.is_owner:
+            # only the owner's chat may set the official menu (19673006): never
+            # ask a customer for an upload
+            _save(db, session, ui)
+            return MSG_MENU_SOON, [[("🛒 ابدأ الطلب", callbacks.build("cats"))]], None
         ui["await_menu_image"] = True
         _save(db, session, ui)
         return MSG_ASK_MENU_IMAGE, [], None
@@ -463,7 +481,10 @@ def handle_photo(db: Session, link: TelegramLink, file_id: str
                  ) -> tuple[str, list[list[tuple[str, str]]]]:
     """A photo while await_menu_image is set: store the reference on the business.
     Only the Telegram file_id is kept (Telegram serves the bytes); the largest
-    photo size is chosen by the caller. uploaded_by records which chat sent it."""
+    photo size is chosen by the caller. uploaded_by records which chat sent it.
+    Owner links only (19673006): a non-owner photo never becomes the menu."""
+    if not link.is_owner:
+        return MSG_MENU_PHOTO_OWNER_ONLY, []
     business = db.get(Business, link.business_id)
     if business is not None:
         business.menu_photo_file_id = file_id[:200]

@@ -90,16 +90,20 @@ def test_code_is_stored_hashed(client, db_session, shop):  # noqa: F811
     assert code not in row.code_hash and row.code_hash == svc.hash_code(code)
 
 
-def test_linked_chat_cannot_be_silently_relinked(client, db_session, shop):  # noqa: F811
+def test_linked_chat_repoints_to_new_code_audited(client, db_session, shop):  # noqa: F811
     other = client.post("/api/v1/customers", headers=shop["h"], json={"name": "تاني"}).json()
     c1, c2 = issue(client, shop), issue(client, shop, other["id"])
     assert say(db_session, 666, f"/start {c1}") == svc.MSG_LINKED
-    assert say(db_session, 666, f"/start {c2}") == svc.MSG_ALREADY_LINKED
+    # since the auto-link change (19672361) a new valid code re-points the chat to
+    # the code's customer; the move is audited, never silent
+    assert say(db_session, 666, f"/start {c2}") == svc.MSG_LINKED
     link = db_session.scalar(select(TelegramLink))
-    assert str(link.customer_id) == shop["c"]["id"]
+    assert str(link.customer_id) == other["id"]
     assert say(db_session, 666, "/stop") == svc.MSG_UNLINKED
     assert say(db_session, 666, "٣ سكر") == svc.MSG_NOT_LINKED
-    assert say(db_session, 666, f"/start {c2}") == svc.MSG_LINKED
+    assert say(db_session, 666, f"/start {c2}") == svc.MSG_BAD_CODE  # single use
+    c3 = issue(client, shop)
+    assert say(db_session, 666, f"/start {c3}") == svc.MSG_LINKED
 
 
 def test_cross_tenant_isolation(client, db_session, shop, two_businesses):  # noqa: F811

@@ -63,6 +63,35 @@ def list_links(
     ]
 
 
+@router.post("/links/{link_id}/owner", status_code=status.HTTP_204_NO_CONTENT)
+def mark_link_owner(
+    link_id: uuid.UUID,
+    business: Business = Depends(get_business),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a telegram link as the shop owner's own chat. Owner role only, and only
+    through this authenticated API - never from a customer chat message (19673006).
+    Owner chats are the only ones that may set the official menu photo."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    link = db.scalar(
+        select(TelegramLink).where(
+            TelegramLink.business_id == business.id, TelegramLink.id == link_id
+        )
+    )
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link not found")
+    link.is_owner = True
+    db.add(link)
+    write_audit(
+        db, business_id=business.id, actor_id=user.id, entity="telegram_link",
+        entity_id=str(link.customer_id), action="mark_owner",
+        payload={"link_id": str(link.id), "by": str(user.id)},
+    )
+    db.commit()
+
+
 @router.delete("/links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_link(
     link_id: uuid.UUID,
