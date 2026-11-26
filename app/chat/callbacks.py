@@ -10,10 +10,11 @@ Actions:
     cats                      list menu categories (level 1)
     cat:<category>:p<page>    one category's items, 6 per page
     it:<item_id>              item picked -> variant buttons, or quantity when univariant
-    var:<item_id>:<variant_id>  variant picked -> quantity quick buttons
-    wq:<grams>                weight quick pick (grams, e.g. 500 = نص كيلو)
-    uq:<n>                    unit quick pick (1/2/3/5)
-    qcustom                   ask for a typed quantity (custom number state)
+    var:<variant_id>          variant picked -> the numeric keypad
+    npd:<digit>               numpad digit 0-9
+    npdot                     numpad decimal point (weight items only)
+    npb                       numpad backspace
+    npc                       numpad confirm
     cart                      cart review message
     cadd                      add another item (back to categories, keep draft)
     cok                       confirm the order (same as «تمام»)
@@ -58,7 +59,7 @@ def parse(data: str) -> Callback | None:
         return None
     if action == "cat" and (not args[1].startswith("p") or not args[1][1:].isdigit()):
         return None
-    if action in ("wq", "uq") and not args[0].isdigit():
+    if action == "npd" and (len(args[0]) != 1 or not args[0].isdigit()):
         return None
     if action in ("it",) and not _is_uuid(args[0]):
         return None
@@ -68,7 +69,8 @@ def parse(data: str) -> Callback | None:
 
 
 _ARITY = {
-    "cats": 0, "cat": 2, "it": 1, "var": 1, "wq": 1, "uq": 1, "qcustom": 0,
+    "cats": 0, "cat": 2, "it": 1, "var": 1,
+    "npd": 1, "npdot": 0, "npb": 0, "npc": 0,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
     "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0,
 }

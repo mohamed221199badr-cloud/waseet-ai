@@ -115,12 +115,14 @@ def test_full_button_flow_to_draft_order(db_session, linked, menu):  # noqa: F81
     rep = tap(db_session, cb_codec.build("cat", "اللحوم", "p0"))
     assert rep.edit_message_id == 42 and rep.store_msg_id
     assert any("مفروم احمر" in lbl for lbl in _flat(rep.button_rows))
-    # step 2: single-variant weight item goes straight to quantity quick buttons
+    # step 2: single-variant weight item goes straight to the numeric keypad
     rep = tap(db_session, cb_codec.build("it", menu["meat"].id))
     labels = _flat(rep.button_rows)
-    assert "نص كيلو" in labels and "كيلو" in labels and "✍️ كمية تانية" in labels
-    # step 3: quick quantity adds the line and shows the cart with subtotal
-    rep = tap(db_session, cb_codec.build("wq", 1000))
+    assert all(str(n) in labels for n in range(10)) and "✅ تأكيد" in labels
+    assert "." in labels  # weight items get the decimal point
+    # step 3: keypad entry (1 كيلو) adds the line and shows the cart with subtotal
+    tap(db_session, cb_codec.build("npd", 1))
+    rep = tap(db_session, cb_codec.build("npc"))
     assert "مفروم احمر" in rep.text and "450" in rep.text
     assert "✅ تأكيد الطلب" in _flat(rep.button_rows)
     # step 4: confirm creates the draft order through the shared menu_agent path
@@ -138,7 +140,9 @@ def test_multi_variant_item_shows_variant_buttons(db_session, linked, menu):  # 
     # variant id alone resolves the item (64-byte budget: no item id in the payload)
     rep = tap(db_session, cb_codec.build("var", menu["burger_v"][1].id))
     assert "برجر بلدي" in rep.text
-    rep = tap(db_session, cb_codec.build("uq", 2))
+    assert "." not in _flat(rep.button_rows)  # unit item: no decimal button
+    tap(db_session, cb_codec.build("npd", 2))
+    rep = tap(db_session, cb_codec.build("npc"))
     assert "700" in rep.text  # 2 x 350
 
 
@@ -159,31 +163,25 @@ def test_pagination_six_per_page(db_session, linked, menu):  # noqa: F811
     assert "◀ السابق" in _flat(rep.button_rows)
 
 
-def test_custom_quantity_state_and_validation(db_session, linked, menu):  # noqa: F811
+def test_numpad_quantity_state_and_validation(db_session, linked, menu):  # noqa: F811
     tap(db_session, cb_codec.build("cat", "اللحوم", "p0"))
     tap(db_session, cb_codec.build("it", menu["meat"].id))
-    rep = tap(db_session, cb_codec.build("qcustom"))
-    assert "اكتب الكمية" in rep.text
-    # invalid input re-asks without losing the selection
-    out = svc.handle_update(db_session, {
-        "update_id": next(_ids),
-        "message": {"message_id": 9, "text": "كتير",
-                    "chat": {"id": CHAT, "type": "private"},
-                    "from": {"id": CHAT, "is_bot": False}}})
-    assert "ما فهمتش الكمية" in out[0].text
-    # a valid fraction lands in the cart at DB price
-    out = svc.handle_update(db_session, {
-        "update_id": next(_ids),
-        "message": {"message_id": 10, "text": "2.5",
-                    "chat": {"id": CHAT, "type": "private"},
-                    "from": {"id": CHAT, "is_bot": False}}})
-    assert "2.5" in out[0].text and "1125" in out[0].text  # 2.5 x 450
+    # empty confirmation re-asks without losing the selection
+    rep = tap(db_session, cb_codec.build("npc"))
+    assert "اكتب الكمية الأول" in rep.text and "✅ تأكيد" in _flat(rep.button_rows)
+    # a valid fraction lands in the cart at DB price: 2.5
+    tap(db_session, cb_codec.build("npd", 2))
+    tap(db_session, cb_codec.build("npdot"))
+    tap(db_session, cb_codec.build("npd", 5))
+    rep = tap(db_session, cb_codec.build("npc"))
+    assert "2.5" in rep.text and "1125" in rep.text  # 2.5 x 450
 
 
 def test_clear_cart_requires_confirmation(db_session, linked, menu):  # noqa: F811
     tap(db_session, cb_codec.build("cat", "اللحوم", "p0"))
     tap(db_session, cb_codec.build("it", menu["meat"].id))
-    tap(db_session, cb_codec.build("wq", 500))
+    tap(db_session, cb_codec.build("npd", 1))
+    tap(db_session, cb_codec.build("npc"))
     rep = tap(db_session, cb_codec.build("cclr"))
     assert "متأكد" in rep.text
     # "no" returns to the cart with the line intact
@@ -201,8 +199,10 @@ def test_forged_ids_get_stale_and_no_crash(db_session, linked, menu):  # noqa: F
     assert "مش متاح" in rep.text
     rep = tap(db_session, cb_codec.build("var", uuid.uuid4()))
     assert "مش متاح" in rep.text
-    # wq without a selection in progress is stale, never an order line
-    rep = tap(db_session, cb_codec.build("wq", 1000))
+    # keypad taps without a selection in progress are stale, never an order line
+    rep = tap(db_session, cb_codec.build("npd", 1))
+    assert "مش متاح" in rep.text
+    rep = tap(db_session, cb_codec.build("npc"))
     assert "مش متاح" in rep.text
 
 
