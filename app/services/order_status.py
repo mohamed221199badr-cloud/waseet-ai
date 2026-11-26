@@ -86,17 +86,38 @@ def transition(db: Session, order: Order, to_status: str, *,
     if to_status == "out_for_delivery":
         order.delivery_attempts += 1
     order.status = to_status
-    db.add(OrderStatusHistory(
+    hist = OrderStatusHistory(
         business_id=order.business_id, order_id=order.id,
         from_status=from_status, to_status=to_status,
         actor_type=actor_type, actor_id=actor_id if actor_type == "user" else None,
-        reason=reason))
+        reason=reason)
+    db.add(hist)
     write_audit(db, business_id=order.business_id, entity="order", entity_id=str(order.id),
                 action="status_change",
                 payload={"from": from_status, "to": to_status, "actor_type": actor_type,
                          "actor_id": str(actor_id) if actor_id else None, "reason": reason})
     db.flush()
+    _notify_transition(db, order, hist)
     return order
+
+
+# customer-facing transitions queue a customer notification; a failed delivery is
+# routed to the manager (v3: task and notification). occurrence = the history row,
+# so a repeated event (redelivery -> ready again) is queued, not swallowed (C1).
+_CUSTOMER_EVENTS = frozenset(
+    {"confirmed", "rejected", "ready", "out_for_delivery", "delivered", "cancelled"})
+
+
+def _notify_transition(db: Session, order: Order, hist: OrderStatusHistory) -> None:
+    from app.services import outbox
+    if hist.to_status in _CUSTOMER_EVENTS:
+        outbox.emit(db, order.business_id, f"order.{hist.to_status}", order.id,
+                    "customer", str(order.customer_id), occurrence=hist.id,
+                    payload={"status": hist.to_status, "reason": hist.reason})
+    if hist.to_status == "failed_delivery":
+        outbox.emit(db, order.business_id, "order.failed_delivery", order.id,
+                    "role_group", "manager", occurrence=hist.id,
+                    payload={"status": hist.to_status, "reason": hist.reason})
 
 
 def assign_driver(db: Session, order: Order, driver_user_id: uuid.UUID, *,

@@ -419,6 +419,7 @@ class OrderStatusHistory(Base):
                         name="ck_osh_named_actor"),
         CheckConstraint("actor_type = 'user' or actor_id is null",
                         name="ck_osh_customer_unattributed"),
+        UniqueConstraint("business_id", "id", name="uq_osh_business_id"),
         ForeignKeyConstraint(
             ["business_id", "order_id"], ["orders.business_id", "orders.id"],
             ondelete="CASCADE", name="fk_osh_order_same_business",
@@ -439,3 +440,43 @@ class OrderStatusHistory(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     order: Mapped[Order] = relationship(back_populates="status_history")
+
+
+class NotificationOutbox(Base):
+    """One intended notification (Phase 3b, v3 C1/C3). dedupe_key is unique and built
+    only by outbox.build_dedupe_key: racing dispatchers collide on the key and the
+    second insert is dropped. occurrence is the order_status_history row that caused
+    the event (NULL for non-repeating events) so repeats are not swallowed."""
+
+    __tablename__ = "notification_outbox"
+    __table_args__ = (
+        CheckConstraint("recipient_type in ('customer','user','role_group')",
+                        name="ck_outbox_recipient_type"),
+        CheckConstraint("status in ('pending','sent','failed')",
+                        name="ck_outbox_status"),
+        ForeignKeyConstraint(
+            ["business_id", "order_id"], ["orders.business_id", "orders.id"],
+            ondelete="CASCADE", name="fk_outbox_order_same_business"),
+        ForeignKeyConstraint(
+            ["business_id", "occurrence"],
+            ["order_status_history.business_id", "order_status_history.id"],
+            ondelete="SET NULL", name="fk_outbox_occurrence_same_business"),
+        Index("ix_outbox_pending", "business_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(300), unique=True)
+    event: Mapped[str] = mapped_column(String(50))
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    recipient_type: Mapped[str] = mapped_column(String(20))
+    recipient_id: Mapped[str] = mapped_column(String(100))
+    channel: Mapped[str] = mapped_column(String(20), default="telegram")
+    occurrence: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(nullable=True)
