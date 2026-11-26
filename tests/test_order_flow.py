@@ -192,3 +192,11 @@ def test_invalid_transition_rejected(db_session, world):
     with pytest.raises(TransitionError):
         transition(db_session, world["order"], "delivered", actor_type="user",
                    role="owner", actor_id=uuid.uuid4())
+
+
+def test_menu_order_submits_via_repo(db_session, world):
+    # Phase 2 menu orders carry OrderLines, not OrderItems: the submit gate must
+    # not call them empty (regression: cashier could never submit a bot menu order)
+    from app.repositories import orders as orders_repo
+    orders_repo.submit(db_session, world["order"])
+    assert world["order"].status == "awaiting_confirmation"

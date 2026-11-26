@@ -133,7 +133,7 @@ def submit(db: Session, order: Order) -> Order:
     _require_draft(order)
     if any(e.status == "open" for e in order.exceptions):
         raise OrderStateError("order has unresolved exceptions; resolve or dismiss them first")
-    if not order.items:
+    if not order.items and not order.lines:
         raise OrderStateError("cannot submit an empty order")
     order.status = "awaiting_confirmation"
     db.flush()
