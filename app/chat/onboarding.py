@@ -120,6 +120,24 @@ def handle_contact(db: Session, link: TelegramLink, contact: dict,
     return _done_or_next(db, link)
 
 
+_DELIVERY_WORDS = ("توصيل", "دليفري", "لحد عندي", "لحد البيت", "المنزل", "هوصل")
+_PICKUP_WORDS = ("استلام", "من المحل", "بيك اب", "pickup", "هستلم")
+
+
+def delivery_answer(text: str) -> str | None:
+    """Typed fallback for the delivery/pickup step (hotfix 19793273): customers who
+    type the answer instead of tapping. Normalized word match, delivery first."""
+    from app.matching.normalize import normalize
+    t = normalize(text)
+    if not t:
+        return None
+    if any(normalize(w) in t for w in _DELIVERY_WORDS):
+        return "delivery"
+    if any(normalize(w) in t for w in _PICKUP_WORDS):
+        return "pickup"
+    return None
+
+
 def handle_delivery_choice(db: Session, link: TelegramLink, method: str) -> dict:
     customer = db.get(Customer, link.customer_id)
     if customer is None or customer.phone is None:

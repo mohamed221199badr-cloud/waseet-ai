@@ -151,3 +151,30 @@ def test_interrupted_onboarding_recovers(db_session, linked_new, menu):  # noqa:
     assert cust.phone == "+201017597501"
     out = _say(db_session, "أهلا")  # plain text mid-onboarding
     assert "يوصلك لحد عندك" in out[0].text  # resumes at the missing field
+
+
+def test_typed_delivery_answers_work_without_buttons(db_session, linked_new, menu):  # noqa: F811
+    # hotfix 19793273: he typed the answer when the buttons were missing
+    _say(db_session, "/start")
+    _contact(db_session)
+    out = _say(db_session, "من المحل")
+    assert "أهلاً وسهلاً" in out[0].text
+    assert _customer(db_session, linked_new).delivery_method == "pickup"
+
+
+def test_typed_delivery_then_address(db_session, linked_new, menu):  # noqa: F811
+    _say(db_session, "/start")
+    _contact(db_session)
+    out = _say(db_session, "توصيل")
+    assert "عنوانك بالتفصيل" in out[0].text
+    out = _say(db_session, "المعادي، شارع 9، عمارة 3")
+    assert "أهلاً وسهلاً" in out[0].text
+    assert _customer(db_session, linked_new).delivery_method == "delivery"
+
+
+def test_unrelated_text_still_reshows_step(db_session, linked_new, menu):  # noqa: F811
+    _say(db_session, "/start")
+    _contact(db_session)
+    out = _say(db_session, "اهلا")
+    assert "يوصلك لحد عندك" in out[0].text
+    assert _customer(db_session, linked_new).delivery_method is None
