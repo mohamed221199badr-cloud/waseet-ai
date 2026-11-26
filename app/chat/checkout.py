@@ -83,7 +83,8 @@ def _delivery_type_spec(ui: dict, edit_id=None) -> dict:
     ui["checkout_step"] = "awaiting_delivery_type"
     return _spec(MSG_DELIVERY_TYPE,
                  rows=[[("🛵 دليفري", callbacks.build("ckdel", "delivery")),
-                        ("🏪 استلام", callbacks.build("ckdel", "pickup"))]],
+                        ("🏪 استلام", callbacks.build("ckdel", "pickup"))],
+                       [("🔙 رجوع", callbacks.build("cart"))]],
                  remove_keyboard=True, edit_id=edit_id)
 
 
@@ -100,7 +101,8 @@ def _summary_spec(db: Session, link: TelegramLink, ui: dict, lines: list[dict],
         parts.append(f"العنوان: {ui['temp_address']}")
     return _spec("\n".join(parts),
                  rows=[[("✅ تأكيد وإرسال للكاشير", callbacks.build("ckok"))],
-                       [("❌ إلغاء", callbacks.build("ckno"))]],
+                       [("❌ إلغاء", callbacks.build("ckno"))],
+                       [("🔙 رجوع", callbacks.build("cart"))]],
                  remove_keyboard=True, edit_id=edit_id)
 
 
@@ -117,7 +119,8 @@ def _after_method(db: Session, link: TelegramLink, ui: dict, lines: list[dict],
         ui["checkout_step"] = "awaiting_address_reuse"
         return _spec(MSG_ADDRESS_REUSE.format(address=saved[:300]),
                      rows=[[("أيوه", callbacks.build("ckaddr", "keep")),
-                            ("لأ، غير العنوان", callbacks.build("ckaddr", "change"))]],
+                            ("لأ، غير العنوان", callbacks.build("ckaddr", "change"))],
+                            [("🔙 رجوع", callbacks.build("cart"))]],
                      remove_keyboard=True, edit_id=edit_id)
     ui["checkout_step"] = "awaiting_address"
     return _spec(MSG_ADDRESS_ASK, remove_keyboard=True, edit_id=edit_id)
@@ -159,7 +162,8 @@ def current_spec(db: Session, link: TelegramLink) -> dict:
         saved = (customer.address or "").strip() if customer is not None else ""
         return _spec(MSG_ADDRESS_REUSE.format(address=saved[:300]),
                      rows=[[("أيوه", callbacks.build("ckaddr", "keep")),
-                            ("لأ، غير العنوان", callbacks.build("ckaddr", "change"))]],
+                            ("لأ، غير العنوان", callbacks.build("ckaddr", "change"))],
+                            [("🔙 رجوع", callbacks.build("cart"))]],
                      remove_keyboard=True, edit_id=ui.get("msg_id"))
     if step == "awaiting_address":
         return _spec(MSG_ADDRESS_ASK, remove_keyboard=True, edit_id=ui.get("msg_id"))

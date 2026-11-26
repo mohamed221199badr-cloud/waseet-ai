@@ -131,6 +131,7 @@ def _cats_rows(db: Session, link: TelegramLink, lines: list[dict]) -> list[list[
             for c in list_categories(db, link.business_id) if c.name != PASTRY_CATEGORY]
     if _ok_lines(lines):
         rows.append([("🛒 السلة", callbacks.build("cart"))])
+    rows.append([("🔙 رجوع", callbacks.build("home"))])  # back to the welcome screen
     return rows
 
 
@@ -151,7 +152,11 @@ def _items_rows(cat, category: str, page: int) -> tuple[list[list[tuple[str, str
             nav.append(("التالي ▶", callbacks.build("cat", category, f"p{page + 1}")))
         rows.append(nav)
     rows.append([("🔍 بحث عن صنف", callbacks.build("sc", category, f"p{page}"))])
-    rows.append([("🔙 الأصناف", callbacks.build("cats"))])
+    if category == PASTRY_CATEGORY:
+        # the الفطائر menu is entered from the welcome screen: back goes there
+        rows.append([("🔙 رجوع", callbacks.build("home"))])
+    else:
+        rows.append([("🔙 الأصناف", callbacks.build("cats"))])
     return rows, page, total_pages
 
 
@@ -251,6 +256,7 @@ def _cart_rows() -> list[list[tuple[str, str]]]:
         [("➕ أضف صنف", callbacks.build("cadd"))],
         [("🧹 إفراغ السلة", callbacks.build("cclr"))],
         [("❌ إلغاء الطلب", callbacks.build("ccancel"))],
+        [("🔙 رجوع", callbacks.build("cats"))],
     ]
 
 
@@ -659,12 +665,14 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
             # an official menu image exists: send it, never ask for an upload
             ui["await_menu_image"] = False
             _save(db, session, ui)
-            return "", [[("🛒 ابدأ الطلب", callbacks.build("cats"))]], file_id
+            return "", [[("🛒 ابدأ الطلب", callbacks.build("cats"))],
+                                       [("🔙 رجوع", callbacks.build("home"))]], file_id
         if not link.is_owner:
             # only the owner's chat may set the official menu (19673006): never
             # ask a customer for an upload
             _save(db, session, ui)
-            return MSG_MENU_SOON, [[("🛒 ابدأ الطلب", callbacks.build("cats"))]], None
+            return MSG_MENU_SOON, [[("🛒 ابدأ الطلب", callbacks.build("cats"))],
+                                       [("🔙 رجوع", callbacks.build("home"))]], None
         ui["await_menu_image"] = True
         _save(db, session, ui)
         return MSG_ASK_MENU_IMAGE, [], None
@@ -714,7 +722,8 @@ def handle_photo(db: Session, link: TelegramLink, file_id: str
     session, ui, _lines = _ensure_session(db, link)
     ui.update(await_menu_image=False, screen="cats")
     _save(db, session, ui)
-    return MSG_MENU_IMAGE_SAVED, [[("🛒 ابدأ الطلب", callbacks.build("cats"))]]
+    return MSG_MENU_IMAGE_SAVED, [[("🛒 ابدأ الطلب", callbacks.build("cats"))],
+                                       [("🔙 رجوع", callbacks.build("home"))]]
 
 
 # ---------- per-category page photos (m014, WhatsApp spec 2026-11-26) ----------
