@@ -151,8 +151,8 @@ def test_multi_variant_item_shows_variant_buttons(db_session, linked, menu):  # 
     rep = tap(db_session, cb_codec.build("cat", "مصنعات", "p0"))
     rep = tap(db_session, cb_codec.build("it", menu["burger"].id))
     labels = _flat(rep.button_rows)
-    assert any("سعر 1" in lbl and "280" in lbl for lbl in labels)
-    assert any("سعر 2" in lbl and "350" in lbl for lbl in labels)
+    assert "280ج" in labels and "350ج" in labels  # generic «سعر N» shows its price
+    assert not any("سعر" in lbl for lbl in labels)
     # variant id alone resolves the item (64-byte budget: no item id in the payload)
     rep = tap(db_session, cb_codec.build("var", menu["burger_v"][1].id))
     assert "برجر بلدي" in rep.text

@@ -54,6 +54,27 @@ MAX_BUTTONS = 10
 def _money(d) -> str:
     return str(Decimal(d).quantize(Decimal("0.01")))
 
+
+_GENERIC_VARIANT = re.compile(r"^\s*سعر\s*[0-9٠-٩]+\s*$")
+
+
+def is_generic_variant(name: str) -> bool:
+    """«سعر 1» / «سعر ٢»: a price tier label, not a real size or weight name."""
+    return bool(_GENERIC_VARIANT.match(name or ""))
+
+
+def _price_short(d) -> str:
+    d = Decimal(d)
+    return str(int(d)) if d == d.to_integral_value() else _money(d)
+
+
+def variant_label(name: str, price) -> str:
+    """Display only: a generic «سعر N» variant shows its actual unit price (270ج); real
+    names (M, L, XL, weights) stay as they are. The DB name is never changed."""
+    if price is not None and is_generic_variant(name):
+        return f"{_price_short(price)}ج"
+    return name
+
 MSG_VARIANT = "«{item}» عندنا بأكتر من سعر، تحب أنهي؟"
 MSG_PRICE_REQUIRED = ("«{item}» سعره بيتحدد مع الكاشير عشان الوزن، فمش هقدر أضيفه للطلب "
                       "من هنا. الكاشير هيكلمك فيه، تحب تضيف حاجة تانية؟")
@@ -373,6 +394,8 @@ def _next_question(db: Session, link: TelegramLink, cat: Catalog, lines: list[di
                 price, _ = resolve_variant_price(db, link.business_id, link.customer_id, v)
                 label = (f"{v.name} - {_money(price)}ج" if price is not None
                          else f"{v.name} - السعر عند الكاشير")
+                if price is not None and is_generic_variant(v.name):
+                    label = variant_label(v.name, price)
                 opts.append(label)
             return (MSG_VARIANT.format(item=item.name) + "\n"
                     + "\n".join(f"{i}) {o}" for i, o in enumerate(opts, 1))
@@ -537,8 +560,12 @@ def _smalltalk(db: Session, link: TelegramLink, text: str, cat: Catalog) -> str 
                 for v in cat.variants.get(str(item.id), []):
                     price, _ = resolve_variant_price(
                         db, link.business_id, link.customer_id, v)
-                    parts.append(f"{v.name}: {_money(price)}" if price is not None
-                                 else f"{v.name}: السعر عند الكاشير")
+                    if price is None:
+                        parts.append(f"{v.name}: السعر عند الكاشير")
+                    elif is_generic_variant(v.name):
+                        parts.append(variant_label(v.name, price))
+                    else:
+                        parts.append(f"{v.name}: {_money(price)}")
                 return f"{item.name} - " + "، ".join(parts) + ". لو عايز تطلب اكتب الكمية."
         return "قولي اسم الصنف وأقولك سعره، مثال: «سعر الكفتة»."
     return None

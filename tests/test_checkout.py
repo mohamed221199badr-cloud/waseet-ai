@@ -368,3 +368,33 @@ def test_cart_has_no_add_button_and_confirm_asks_add_more_first(db_session, link
     tap(db_session, cb_codec.build("cok"))
     go = tap(db_session, cb_codec.build("ckgo"))               # continue: checkout starts
     assert "دليفري ولا استلام" in go.text
+
+
+def test_generic_price_variants_show_the_actual_price(db_session, linked, menu):  # noqa: F811
+    from app.chat import cashier_actions
+    from app.chat.menu_agent import is_generic_variant, variant_label
+    from app.models_orders import OrderLine
+    assert is_generic_variant("سعر 1") and is_generic_variant("سعر ٢")
+    assert not is_generic_variant("M") and not is_generic_variant("نص كيلو")
+    assert variant_label("سعر 1", 270) == "270ج" and variant_label("M", 270) == "M"
+    assert variant_label("سعر 1", None) == "سعر 1"
+    tap(db_session, cb_codec.build("cat", "مصنعات", "p0"))
+    pick = tap(db_session, cb_codec.build("it", menu["burger"].id))
+    labels = _flat(pick.button_rows)
+    assert "280ج" in labels and "350ج" in labels and not any("سعر" in lbl for lbl in labels)
+    tap(db_session, cb_codec.build("var", menu["burger_v"][0].id))
+    tap(db_session, cb_codec.build("npd", 2))
+    cart = tap(db_session, cb_codec.build("npc"))
+    assert "(280ج) × 2 = 560.00ج" in cart.text and "سعر 1" not in cart.text
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
+    notice = [r for r in out if r.text.startswith("🔔")]
+    assert notice == [] or "سعر 1" not in notice[0].text  # no owner chat in this fixture
+    order = db_session.scalar(select(Order))
+    lines = list(db_session.scalars(select(OrderLine).where(OrderLine.order_id == order.id)))
+    assert lines[0].variant_name == "سعر 1"               # DB name untouched
+    acc = cashier_actions.accounts_text(order, lines, None, "x")
+    assert "سعر 1" not in acc and "× 280.00" in acc
+    assert "(سعر 1)" in cashier_actions.kitchen_text(order, lines)  # kitchen: no prices

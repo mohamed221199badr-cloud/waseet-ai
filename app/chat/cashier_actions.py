@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import write_audit
 from app.chat import callbacks
-from app.chat.menu_agent import _money, _qty
+from app.chat.menu_agent import _money, _qty, is_generic_variant
 from app.config import settings
 from app.models_orders import Customer, Order, OrderLine, TelegramLink
 
@@ -49,6 +49,12 @@ def _qty_text(ln: OrderLine) -> str:
     return f"{_qty(ln.quantity)}" + (f" {ln.unit_label}" if ln.unit_label else "")
 
 
+def _variant_part(ln: OrderLine) -> str:
+    """Accounts show the price on the line already, so a generic «سعر N» variant is dropped
+    instead of repeated; real names (M, L, weights) stay."""
+    return "" if is_generic_variant(ln.variant_name) else f" ({ln.variant_name})"
+
+
 def kitchen_text(order: Order, lines: list[OrderLine]) -> str:
     """Items only: no prices, no customer phone or address."""
     body = "\n".join(f"• {ln.item_name} ({ln.variant_name}) × {_qty_text(ln)}"
@@ -60,7 +66,7 @@ def kitchen_text(order: Order, lines: list[OrderLine]) -> str:
 def accounts_text(order: Order, lines: list[OrderLine], customer, by: str) -> str:
     """Prices and totals, customer name/phone, who confirmed."""
     body = "\n".join(
-        f"• {ln.item_name} ({ln.variant_name}) {_qty_text(ln)} × {_money(ln.unit_price)}"
+        f"• {ln.item_name}{_variant_part(ln)} {_qty_text(ln)} × {_money(ln.unit_price)}"
         f" = {_money(ln.line_total)}ج" for ln in lines)
     who = customer.name if customer is not None else "-"
     phone = f" - {customer.phone}" if customer is not None and customer.phone else ""
