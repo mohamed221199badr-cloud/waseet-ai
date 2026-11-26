@@ -15,6 +15,7 @@ import httpx
 
 from app.config import settings
 from app.db import SessionLocal
+from app.chat import menu_buttons
 from app.telegram.service import handle_update
 
 log = logging.getLogger("waseet.telegram")
@@ -51,13 +52,46 @@ class TelegramClient:
             params["offset"] = offset
         return self._call("getUpdates", **params)["result"]
 
+    @staticmethod
+    def _markup(buttons: list[tuple[str, str]] | None,
+                button_rows: list[list[tuple[str, str]]] | None) -> dict | None:
+        """Inline keyboard payload. button_rows gives explicit rows (pagination,
+        quick-quantity grids); flat buttons keep the old one-per-row layout."""
+        rows = button_rows if button_rows is not None else (
+            [[b] for b in buttons] if buttons else None)
+        if not rows:
+            return None
+        return {"inline_keyboard": [
+            [{"text": label, "callback_data": data} for label, data in row] for row in rows]}
+
     def send_message(self, chat_id: int, text: str,
-                     buttons: list[tuple[str, str]] | None = None) -> None:
+                     buttons: list[tuple[str, str]] | None = None,
+                     button_rows: list[list[tuple[str, str]]] | None = None) -> int:
+        """Sends and returns the new message_id (stored to edit the message later)."""
         params: dict = {"chat_id": chat_id, "text": text}
-        if buttons:
-            params["reply_markup"] = {"inline_keyboard": [
-                [{"text": label, "callback_data": data}] for label, data in buttons]}
-        self._call("sendMessage", **params)
+        markup = self._markup(buttons, button_rows)
+        if markup:
+            params["reply_markup"] = markup
+        return self._call("sendMessage", **params)["result"]["message_id"]
+
+    def edit_message(self, chat_id: int, message_id: int, text: str,
+                     buttons: list[tuple[str, str]] | None = None,
+                     button_rows: list[list[tuple[str, str]]] | None = None) -> bool:
+        """Edit text + keyboard of one of the bot's own messages. False when Telegram
+        refuses (message gone/too old or content unchanged): the caller then sends a
+        fresh message instead."""
+        params: dict = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        markup = self._markup(buttons, button_rows)
+        if markup:
+            params["reply_markup"] = markup
+        try:
+            self._call("editMessageText", **params)
+            return True
+        except TelegramError as exc:
+            if "message is not modified" in str(exc) or "message can't be edited" in str(exc) \
+                    or "message to edit not found" in str(exc):
+                return False
+            raise
 
     def answer_callback_query(self, callback_query_id: str) -> None:
         """Stops the client's loading spinner; no text shown to the customer."""
@@ -84,7 +118,24 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
                 if rep.answer_callback_id is not None:
                     client.answer_callback_query(rep.answer_callback_id)
                 if rep.text:
-                    client.send_message(rep.chat_id, rep.text, rep.buttons)
+                    mid = None
+                    if rep.edit_message_id is not None:
+                        edited = client.edit_message(
+                            rep.chat_id, rep.edit_message_id, rep.text,
+                            rep.buttons, rep.button_rows)
+                        if edited:
+                            mid = rep.edit_message_id
+                    if mid is None:  # no edit target or Telegram refused: send fresh
+                        mid = client.send_message(
+                            rep.chat_id, rep.text, rep.buttons, rep.button_rows)
+                    if rep.store_msg_id and mid is not None:
+                        # the flow edits this message on the next tap; keep its id
+                        db2 = session_factory()
+                        try:
+                            menu_buttons.set_msg_id(db2, rep.chat_id, mid)
+                            db2.commit()
+                        finally:
+                            db2.close()
             except TelegramError as exc:
                 log.error("send failed: %s", exc)
     return offset

@@ -1,0 +1,85 @@
+"""Centralized callback_data codec (UI v1.8).
+
+One module builds and parses every inline-button payload; handlers never assemble or
+split raw strings themselves. Format: `act:arg[:arg...]` with short action codes so a
+full UUID payload stays well under Telegram's 64-byte limit. Parsing validates shape
+only; ownership and staleness are re-checked by the handlers against the linked
+business's own data, exactly as before.
+
+Actions:
+    cats                      list menu categories (level 1)
+    cat:<category>:p<page>    one category's items, 6 per page
+    it:<item_id>              item picked -> variant buttons, or quantity when univariant
+    var:<item_id>:<variant_id>  variant picked -> quantity quick buttons
+    wq:<grams>                weight quick pick (grams, e.g. 500 = نص كيلو)
+    uq:<n>                    unit quick pick (1/2/3/5)
+    qcustom                   ask for a typed quantity (custom number state)
+    cart                      cart review message
+    cadd                      add another item (back to categories, keep draft)
+    cok                       confirm the order (same as «تمام»)
+    cclr                      ask before clearing the cart
+    cclr_yes / cclr_no        clear-cart confirmation answer
+    ccancel                   cancel the order flow (same as «الغي»)
+    noop                      inert button (current page indicator)
+
+Legacy slice-A payloads (cat_<PREFIX>, buy_, pick_, view_cart, cart_confirm, ...) stay
+handled by the old whitelist until the legacy products path is retired; new menu-mode
+keyboards emit only this codec.
+"""
+
+from dataclasses import dataclass
+
+MAX_CALLBACK_BYTES = 64
+
+
+@dataclass(frozen=True)
+class Callback:
+    action: str
+    args: tuple[str, ...] = ()
+
+    def encode(self) -> str:
+        data = self.action if not self.args else f"{self.action}:{':'.join(self.args)}"
+        if len(data.encode("utf-8")) > MAX_CALLBACK_BYTES:
+            raise ValueError(f"callback_data too long: {data!r}")
+        return data
+
+
+def build(action: str, *args: object) -> str:
+    return Callback(action, tuple(str(a) for a in args)).encode()
+
+
+def parse(data: str) -> Callback | None:
+    """Shape-validated parse. None for anything malformed, unknown, or oversized."""
+    if not isinstance(data, str) or not data or len(data.encode("utf-8")) > MAX_CALLBACK_BYTES:
+        return None
+    parts = data.split(":")
+    action, args = parts[0], tuple(parts[1:])
+    if action not in _ARITY or _ARITY[action] != len(args):
+        return None
+    if action == "cat" and (not args[1].startswith("p") or not args[1][1:].isdigit()):
+        return None
+    if action in ("wq", "uq") and not args[0].isdigit():
+        return None
+    if action in ("it",) and not _is_uuid(args[0]):
+        return None
+    if action in ("var",) and not _is_uuid(args[0]):
+        return None
+    return Callback(action, args)
+
+
+_ARITY = {
+    "cats": 0, "cat": 2, "it": 1, "var": 1, "wq": 1, "uq": 1, "qcustom": 0,
+    "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
+    "ccancel": 0, "noop": 0,
+}
+
+
+def _is_uuid(s: str) -> bool:
+    if len(s) != 36:
+        return False
+    try:
+        import uuid
+        uuid.UUID(s)
+        return True
+    except ValueError:
+        return False

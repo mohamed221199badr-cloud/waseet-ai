@@ -25,6 +25,8 @@ from sqlalchemy.orm import Session
 
 from app.audit import write_audit
 from app.chat import agent as chat_agent
+from app.chat import callbacks as cb_codec
+from app.chat import menu_buttons, menu_catalog
 from app.config import settings
 from app.models_orders import (
     Customer,
@@ -61,6 +63,10 @@ class Reply:
     text: str
     buttons: list[tuple[str, str]] | None = None   # (label, callback_data) inline keyboard
     answer_callback_id: str | None = None          # callback_query id to acknowledge
+    # UI v1.8 (menu mode): multi-row keyboards and edit-in-place navigation
+    button_rows: list[list[tuple[str, str]]] | None = None
+    edit_message_id: int | None = None             # bot message to edit instead of sending
+    store_msg_id: bool = False                     # worker persists the resulting message id
 
 # Pinned callback_data format (slice A, no LLM). Every value matches this whitelist and is
 # validated against the linked business's own data before it does anything:
@@ -163,10 +169,11 @@ def _handle_order(db: Session, link: TelegramLink, text: str) -> str:
     return _order_reply(order, results)
 
 
-def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None]:
+def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Reply | None]:
     """One inline-button tap. Returns (chat_id, reply text); both None means ignore.
-    callback_data is untrusted input: it must match the whitelist and reference the
-    linked business's own data (the agent re-checks product ownership)."""
+    For UI v1.8 codec callbacks it returns a full Reply in the third slot instead.
+    callback_data is untrusted input: it must match the codec or the whitelist and
+    reference the linked business's own data (the agent re-checks ownership)."""
     data = cq.get("data")
     msg = cq.get("message") or {}
     chat = msg.get("chat") or {}
@@ -174,27 +181,45 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None]:
     chat_id = chat.get("id")
     if (chat.get("type") != "private" or not isinstance(chat_id, int)
             or sender.get("is_bot") or not isinstance(data, str)):
-        return None, None
-    if not _CALLBACK_WHITELIST.match(data):
-        return chat_id, None  # unknown or malformed: acknowledge, do nothing
+        return None, None, None
     link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+    parsed = cb_codec.parse(data)
+    if parsed is not None:
+        # UI v1.8 codec: menu-mode businesses only. A legacy-products business never
+        # sees these (its keyboards only emit whitelist values).
+        if link is None:
+            return chat_id, None, Reply(chat_id, MSG_NOT_LINKED,
+                                        answer_callback_id=cq.get("id"))
+        if not menu_catalog.has_menu(db, link.business_id):
+            return chat_id, None, Reply(chat_id, "", answer_callback_id=cq.get("id"))
+        msg_id = msg.get("message_id")
+        text, rows = menu_buttons.handle_callback(
+            db, link, parsed, msg_id if isinstance(msg_id, int) else None)
+        rep = Reply(chat_id, text, answer_callback_id=cq.get("id"),
+                    edit_message_id=msg_id if isinstance(msg_id, int) else None,
+                    store_msg_id=True)
+        if rows:
+            rep.button_rows = rows
+        return chat_id, None, rep
+    if not _CALLBACK_WHITELIST.match(data):
+        return chat_id, None, None  # unknown or malformed: acknowledge, do nothing
     if link is None:
-        return chat_id, MSG_NOT_LINKED
+        return chat_id, MSG_NOT_LINKED, None
     if data == "cart_confirm":
-        return chat_id, chat_agent.handle_confirm(db, link)
+        return chat_id, chat_agent.handle_confirm(db, link), None
     if data == "cart_cancel":
-        return chat_id, chat_agent.handle_cancel(db, link)
+        return chat_id, chat_agent.handle_cancel(db, link), None
     if data == "view_cart":
-        return chat_id, chat_agent.cart_text(db, link)
+        return chat_id, chat_agent.cart_text(db, link), None
     if data == "list_products":
-        return chat_id, chat_agent.handle_message(db, link, "الأصناف")
+        return chat_id, chat_agent.handle_message(db, link, "الأصناف"), None
     if data == "pick_none":
-        return chat_id, chat_agent.handle_skip_choice(db, link)
+        return chat_id, chat_agent.handle_skip_choice(db, link), None
     if data.startswith("pick_"):
-        return chat_id, chat_agent.handle_pick(db, link, data[len("pick_"):])
+        return chat_id, chat_agent.handle_pick(db, link, data[len("pick_"):]), None
     if data.startswith("buy_"):
-        return chat_id, chat_agent.handle_buy(db, link, data[len("buy_"):])
-    return chat_id, chat_agent.category_text(db, link, data[len("cat_"):])  # cat_
+        return chat_id, chat_agent.handle_buy(db, link, data[len("buy_"):]), None
+    return chat_id, chat_agent.category_text(db, link, data[len("cat_"):]), None  # cat_
 
 
 def handle_update(db: Session, update: dict) -> list[Reply]:
@@ -209,10 +234,12 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         if inserted is None:
             db.rollback()
             return []
-        chat_id, text = _handle_callback(db, cq)
+        chat_id, text, v18_reply = _handle_callback(db, cq)
         db.commit()
         if chat_id is None:
             return []
+        if v18_reply is not None:
+            return [v18_reply]
         reply = Reply(chat_id, text or "", answer_callback_id=cq.get("id"))
         if text:
             link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
@@ -260,6 +287,26 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     elif cmd.startswith("/"):
         reply = MSG_HELP
     elif settings.chat_agent_enabled:
+        if menu_catalog.has_menu(db, link.business_id):
+            if menu_buttons.wants_text(db, link):
+                # UI v1.8 custom-quantity state: this text is a number for the flow
+                out, rows, edit_id = menu_buttons.handle_text(db, link, text)
+                db.commit()
+                rep = Reply(chat_id, out, edit_message_id=edit_id, store_msg_id=True)
+                if rows:
+                    rep.button_rows = rows
+                return [rep]
+            reply = chat_agent.handle_message(db, link, text)
+            rep = Reply(chat_id, reply,
+                        buttons=chat_agent.buttons_after(db, link, reply))
+            if rep.buttons is None:
+                # menu mode texts (greeting, help, "الأصناف", typed orders) always
+                # carry the category keyboard so the button flow is one tap away
+                rows = menu_buttons.entry_rows(db, link)
+                if rows:
+                    rep.button_rows = rows
+            db.commit()
+            return [rep]
         reply = chat_agent.handle_message(db, link, text)
         db.commit()
         return [Reply(chat_id, reply, buttons=chat_agent.buttons_after(db, link, reply))]
