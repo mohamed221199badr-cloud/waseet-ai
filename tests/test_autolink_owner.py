@@ -99,7 +99,7 @@ def test_first_message_auto_links_and_welcomes(db_session, menu):  # noqa: F811
     assert cust.telegram_chat_id == CHAT and cust.name == "زبون"
     out = svc.handle_update(db_session, _text(CHAT, "/start"))
     assert "أهلاً وسهلاً" in out[0].text
-    assert "📋 عرض المنيو" in [lbl for row in out[0].button_rows for lbl, _ in row]
+    assert "📋 عرض المنيو" not in [lbl for row in out[0].button_rows for lbl, _ in row]
 
 
 def test_repeat_contact_reuses_the_same_customer(db_session, menu):  # noqa: F811

@@ -577,8 +577,8 @@ SHOP_PHONES = ("01017597501", "01040756249")
 SHOP_WHATSAPP = "01553799899"
 MSG_FINISHED = ("شكراً ليك 🙏 طلبك عند الكاشير وهيتواصلوا معاك قريب.\n"
                 "لو عايز تطلب تاني دوس «طلب جديد».")
+MSG_ADDRESS = f"📍 العنوان:\n{SHOP_ADDRESS}"
 MSG_CONTACT = (f"📞 تواصل معنا:\n"
-               f"العنوان: {SHOP_ADDRESS}\n"
                f"تليفون: {' / '.join(SHOP_PHONES)}\n"
                f"واتساب: {SHOP_WHATSAPP}")
 
@@ -594,9 +594,21 @@ def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str
     if not any(data == callbacks.build("cart") for row in rows for _, data in row):
         rows.append([("🛒 السلة", callbacks.build("cart"))])
     rows.append([("🔍 بحث", callbacks.build("srch"))])
-    rows.append([("📋 عرض المنيو", callbacks.build("showmenu")),
+    # the brochure photo replaces the old «عرض المنيو» button (WhatsApp 9:39);
+    # contact is split into two small buttons: address and phones
+    rows.append([("📍 العنوان", callbacks.build("addr")),
                  ("📞 تواصل معنا", callbacks.build("contact"))])
+    business = db.get(Business, link.business_id)
+    if link.is_owner and not (business and business.menu_photo_file_id):
+        # owner-only path to set the welcome photo (customers never see it)
+        rows.append([("🖼 رفع صورة الترحيب", callbacks.build("showmenu"))])
     return MSG_WELCOME, rows
+
+
+def main_menu_photo(db: Session, link: TelegramLink) -> str | None:
+    """The welcome photo (the business's official menu image), if one is set."""
+    business = db.get(Business, link.business_id)
+    return business.menu_photo_file_id if business is not None else None
 
 
 def welcome(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, str]]]]:
@@ -615,14 +627,15 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
                     msg_id: int | None
                     ) -> tuple[str, list[list[tuple[str, str]]], str | None]:
     """One button tap -> (text, button_rows, photo_file_id or None)."""
-    if cb.action in ("showmenu", "contact"):
+    if cb.action in ("showmenu", "contact", "addr"):
         session, ui, _lines = _ensure_session(db, link)
         ui["await_qty"] = False
         if msg_id is not None:
             ui["msg_id"] = msg_id
-        if cb.action == "contact":
+        if cb.action in ("contact", "addr"):
             _save(db, session, ui)
-            return MSG_CONTACT, [[("🔙 رجوع", callbacks.build("cats"))]], None
+            msg = MSG_CONTACT if cb.action == "contact" else MSG_ADDRESS
+            return msg, [[("🔙 رجوع", callbacks.build("cats"))]], None
         business = db.get(Business, link.business_id)
         file_id = business.menu_photo_file_id if business is not None else None
         if file_id:
