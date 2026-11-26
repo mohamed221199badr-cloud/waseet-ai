@@ -67,6 +67,7 @@ class Reply:
     button_rows: list[list[tuple[str, str]]] | None = None
     edit_message_id: int | None = None             # bot message to edit instead of sending
     store_msg_id: bool = False                     # worker persists the resulting message id
+    photo_file_id: str | None = None               # send this Telegram photo reference
 
 # Pinned callback_data format (slice A, no LLM). Every value matches this whitelist and is
 # validated against the linked business's own data before it does anything:
@@ -193,11 +194,11 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
         if not menu_catalog.has_menu(db, link.business_id):
             return chat_id, None, Reply(chat_id, "", answer_callback_id=cq.get("id"))
         msg_id = msg.get("message_id")
-        text, rows = menu_buttons.handle_callback(
+        text, rows, photo = menu_buttons.handle_callback(
             db, link, parsed, msg_id if isinstance(msg_id, int) else None)
         rep = Reply(chat_id, text, answer_callback_id=cq.get("id"),
                     edit_message_id=msg_id if isinstance(msg_id, int) else None,
-                    store_msg_id=True)
+                    store_msg_id=True, photo_file_id=photo)
         if rows:
             rep.button_rows = rows
         return chat_id, None, rep
@@ -252,7 +253,35 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     chat, sender, text = msg.get("chat") or {}, msg.get("from") or {}, msg.get("text")
     chat_id = chat.get("id")
     if (chat.get("type") != "private" or not isinstance(chat_id, int)
-            or sender.get("is_bot") or not isinstance(text, str) or not text.strip()):
+            or sender.get("is_bot")):
+        return []
+    if not (isinstance(text, str) and text.strip()):
+        # UI v1.8 3.0B: a photo is meaningful only while the customer was asked for
+        # a menu image; anything else non-text is ignored (spec: never ask otherwise)
+        photos = msg.get("photo")
+        if isinstance(photos, list) and photos:
+            link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+            if (link is not None and settings.chat_agent_enabled
+                    and menu_catalog.has_menu(db, link.business_id)
+                    and menu_buttons.wants_photo(db, link)):
+                inserted = db.execute(
+                    pg_insert(TelegramUpdate).values(update_id=update_id)
+                    .on_conflict_do_nothing().returning(TelegramUpdate.update_id)
+                ).first()
+                if inserted is None:
+                    db.rollback()
+                    return []
+                biggest = max(photos, key=lambda p: (p.get("file_size") or 0,
+                                                     p.get("width") or 0))
+                file_id = biggest.get("file_id")
+                if not isinstance(file_id, str) or not file_id:
+                    return []
+                out, rows = menu_buttons.handle_photo(db, link, file_id)
+                db.commit()
+                rep = Reply(chat_id, out, store_msg_id=True)
+                if rows:
+                    rep.button_rows = rows
+                return [rep]
         return []
     # Redelivered update: do nothing. Same transaction as the work, so a crash retries cleanly.
     inserted = db.execute(
@@ -269,7 +298,17 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
 
     if cmd == "/start":
-        reply = _redeem(db, chat_id, arg) if arg.strip() else (MSG_HELP if link else MSG_NOT_LINKED)
+        if arg.strip():
+            reply = _redeem(db, chat_id, arg)
+        elif link is not None and menu_catalog.has_menu(db, link.business_id):
+            # UI v1.8 3.0A: the welcome screen is the menu-mode entry point
+            text_out, rows = menu_buttons.welcome(db, link)
+            db.commit()
+            rep = Reply(chat_id, text_out, store_msg_id=True)
+            rep.button_rows = rows
+            return [rep]
+        else:
+            reply = MSG_HELP if link else MSG_NOT_LINKED
     elif cmd == "/help":
         reply = MSG_HELP if link else MSG_NOT_LINKED
     elif cmd == "/stop":

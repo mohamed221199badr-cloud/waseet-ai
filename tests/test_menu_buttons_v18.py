@@ -228,3 +228,69 @@ def test_prices_come_from_db_never_from_callback(db_session, linked, menu):  # n
     # the codec carries ids and quantities only; this asserts the shape stays that way
     data = cb_codec.build("var", menu["burger_v"][0].id)
     assert "280" not in data and "برجر" not in data
+
+
+# ---------- section 3.0: welcome + menu discovery ----------
+
+
+def _photo_upd(chat_id, sizes):
+    return {
+        "update_id": next(_ids),
+        "message": {
+            "message_id": 21,
+            "photo": [{"file_id": fid, "file_size": sz, "width": sz}
+                      for fid, sz in sizes],
+            "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": chat_id, "is_bot": False},
+        },
+    }
+
+
+def test_start_shows_welcome_with_three_buttons(db_session, linked, menu):  # noqa: F811
+    out = svc.handle_update(db_session, {
+        "update_id": next(_ids),
+        "message": {"message_id": 1, "text": "/start",
+                    "chat": {"id": CHAT, "type": "private"},
+                    "from": {"id": CHAT, "is_bot": False}}})
+    rep = out[0]
+    assert "أهلاً وسهلاً" in rep.text
+    labels = _flat(rep.button_rows)
+    assert "🛒 ابدأ الطلب" in labels and "📋 عرض المنيو" in labels and "📞 تواصل معنا" in labels
+
+
+def test_show_menu_without_image_asks_for_upload(db_session, linked, menu):  # noqa: F811
+    rep = tap(db_session, cb_codec.build("showmenu"))
+    assert "صورة المنيو" in rep.text and rep.photo_file_id is None
+    from app.chat import menu_buttons
+    link = db_session.scalar(
+        select(svc.TelegramLink).where(svc.TelegramLink.chat_id == CHAT))
+    assert menu_buttons.wants_photo(db_session, link)
+
+
+def test_photo_upload_stores_reference_and_acknowledges(db_session, linked, menu):  # noqa: F811
+    tap(db_session, cb_codec.build("showmenu"))
+    out = svc.handle_update(db_session, _photo_upd(
+        CHAT, [("small-id", 100), ("big-id", 900)]))
+    assert "وصلتنا صورة المنيو" in out[0].text
+    assert "🛒 ابدأ الطلب" in _flat(out[0].button_rows)
+    from app.models import Business
+    biz = db_session.get(Business, linked["ids"]["a"])
+    assert biz.menu_photo_file_id == "big-id"  # largest size kept
+    assert biz.menu_photo_uploaded_by == CHAT
+    # now عرض المنيو sends the stored photo instead of asking
+    rep = tap(db_session, cb_codec.build("showmenu"))
+    assert rep.photo_file_id == "big-id" and rep.text == ""
+
+
+def test_photo_without_waiting_state_ignored(db_session, linked, menu):  # noqa: F811
+    out = svc.handle_update(db_session, _photo_upd(CHAT, [("x-id", 100)]))
+    assert out == []
+    from app.models import Business
+    biz = db_session.get(Business, linked["ids"]["a"])
+    assert biz.menu_photo_file_id is None
+
+
+def test_contact_button_replies_with_placeholder(db_session, linked, menu):  # noqa: F811
+    rep = tap(db_session, cb_codec.build("contact"))
+    assert "للتواصل" in rep.text
+    assert "🔙 رجوع" in _flat(rep.button_rows)

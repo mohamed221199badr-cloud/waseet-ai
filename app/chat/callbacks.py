@@ -70,7 +70,7 @@ def parse(data: str) -> Callback | None:
 _ARITY = {
     "cats": 0, "cat": 2, "it": 1, "var": 1, "wq": 1, "uq": 1, "qcustom": 0,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
-    "ccancel": 0, "noop": 0,
+    "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0,
 }
 
 

@@ -97,6 +97,16 @@ class TelegramClient:
                 return False
             raise
 
+    def send_photo(self, chat_id: int, file_id: str,
+                   button_rows: list[list[tuple[str, str]]] | None = None) -> int | None:
+        """Sends a photo by its Telegram file_id reference (no bytes stored by us)."""
+        params: dict = {"chat_id": chat_id, "photo": file_id}
+        markup = self._markup(None, button_rows)
+        if markup:
+            params["reply_markup"] = markup
+        result = self._call("sendPhoto", **params)["result"]
+        return result["message_id"] if isinstance(result, dict) else None
+
     def answer_callback_query(self, callback_query_id: str) -> None:
         """Stops the client's loading spinner; no text shown to the customer."""
         self._call("answerCallbackQuery", callback_query_id=callback_query_id)
@@ -121,6 +131,8 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
             try:
                 if rep.answer_callback_id is not None:
                     client.answer_callback_query(rep.answer_callback_id)
+                if rep.photo_file_id:
+                    client.send_photo(rep.chat_id, rep.photo_file_id, rep.button_rows)
                 if rep.text:
                     mid = None
                     if rep.edit_message_id is not None:

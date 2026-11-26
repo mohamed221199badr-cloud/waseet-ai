@@ -27,6 +27,7 @@ from app.chat.menu_catalog import (
     load_catalog,
     resolve_variant_price,
 )
+from app.models import Business
 from app.models_orders import ChatSession, TelegramLink
 
 PAGE_SIZE = 6
@@ -199,9 +200,9 @@ def entry(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, st
 
 # ---------- callback handling ----------
 
-def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
-                    msg_id: int | None) -> tuple[str, list[list[tuple[str, str]]]]:
-    """One button tap -> one screen. msg_id is the tapped message (edit target)."""
+def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
+              msg_id: int | None) -> tuple[str, list[list[tuple[str, str]]]]:
+    """One navigation tap -> one screen. msg_id is the tapped message (edit target)."""
     cat = load_catalog(db, link.business_id)
     session, ui, lines = _ensure_session(db, link)
     ui["await_qty"] = False
@@ -393,3 +394,76 @@ def set_msg_id(db: Session, chat_id: int, message_id: int) -> None:
         return
     ui["msg_id"] = message_id
     _save(db, session, ui)
+
+
+# ---------- section 3.0: welcome + menu discovery ----------
+
+MSG_WELCOME = ("أهلاً وسهلاً بيك ❤️\n"
+               "نورتنا! إحنا سعداء بخدمتك.\n"
+               "تحب تطلب إيه النهارده؟")
+MSG_ASK_MENU_IMAGE = ("تحب تبعتلنا صورة المنيو؟ 📸\n"
+                      "ابعت صورة المنيو هنا علشان نقدر نساعدك في اختيار طلبك.")
+MSG_MENU_IMAGE_SAVED = "وصلتنا صورة المنيو، شكراً ليك ❤️"
+# no contact info is stored for the business yet; flagged to the owner
+MSG_CONTACT = "📞 للتواصل مع المحل: كلّم المحل مباشرة."
+
+
+def welcome(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, str]]]]:
+    """The /start entry point in menu mode (spec 3.0A)."""
+    session, ui, _lines = _ensure_session(db, link)
+    ui.update(screen="welcome", await_qty=False, await_menu_image=False)
+    _save(db, session, ui)
+    return MSG_WELCOME, [
+        [("🛒 ابدأ الطلب", callbacks.build("cats"))],
+        [("📋 عرض المنيو", callbacks.build("showmenu"))],
+        [("📞 تواصل معنا", callbacks.build("contact"))],
+    ]
+
+
+def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
+                    msg_id: int | None
+                    ) -> tuple[str, list[list[tuple[str, str]]], str | None]:
+    """One button tap -> (text, button_rows, photo_file_id or None)."""
+    if cb.action in ("showmenu", "contact"):
+        session, ui, _lines = _ensure_session(db, link)
+        ui["await_qty"] = False
+        if msg_id is not None:
+            ui["msg_id"] = msg_id
+        if cb.action == "contact":
+            _save(db, session, ui)
+            return MSG_CONTACT, [[("🔙 رجوع", callbacks.build("cats"))]], None
+        business = db.get(Business, link.business_id)
+        file_id = business.menu_photo_file_id if business is not None else None
+        if file_id:
+            # an official menu image exists: send it, never ask for an upload
+            ui["await_menu_image"] = False
+            _save(db, session, ui)
+            return "", [[("🛒 ابدأ الطلب", callbacks.build("cats"))]], file_id
+        ui["await_menu_image"] = True
+        _save(db, session, ui)
+        return MSG_ASK_MENU_IMAGE, [], None
+    text, rows = _navigate(db, link, cb, msg_id)
+    return text, rows, None
+
+
+def wants_photo(db: Session, link: TelegramLink) -> bool:
+    """True while the customer was asked for a menu image (waiting_for_menu_image)."""
+    ui = _ui(_session(db, link))
+    return bool(ui and ui.get("await_menu_image"))
+
+
+def handle_photo(db: Session, link: TelegramLink, file_id: str
+                 ) -> tuple[str, list[list[tuple[str, str]]]]:
+    """A photo while await_menu_image is set: store the reference on the business.
+    Only the Telegram file_id is kept (Telegram serves the bytes); the largest
+    photo size is chosen by the caller. uploaded_by records which chat sent it."""
+    business = db.get(Business, link.business_id)
+    if business is not None:
+        business.menu_photo_file_id = file_id[:200]
+        business.menu_photo_uploaded_by = link.chat_id
+        business.menu_photo_uploaded_at = legacy._now()
+        db.add(business)
+    session, ui, _lines = _ensure_session(db, link)
+    ui.update(await_menu_image=False, screen="cats")
+    _save(db, session, ui)
+    return MSG_MENU_IMAGE_SAVED, [[("🛒 ابدأ الطلب", callbacks.build("cats"))]]
