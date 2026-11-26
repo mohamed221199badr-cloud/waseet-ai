@@ -14,6 +14,7 @@ decision (messages are queued in db.info and sent by the worker after the commit
 
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ from app.chat import callbacks
 from app.chat.menu_agent import _money, _qty, is_generic_variant
 from app.config import settings
 from app.models_orders import Customer, Order, OrderLine, TelegramLink
+from app.notify import sheet_log
 
 ACTIONS = ("oky", "orj", "orr", "orb")
 
@@ -87,6 +89,21 @@ def _queue(db: Session, chat_id: int, text: str) -> None:
     db.info.setdefault("order_notify", []).append((chat_id, text))
 
 
+def sheet_row(order: Order, lines: list[OrderLine], customer, by: str) -> dict:
+    """One Google Sheet row per confirmed order (Cairo time, items on one line)."""
+    notes = order.notes or ""
+    delivery = notes.startswith("دليفري")
+    when = (order.decided_at or datetime.now(timezone.utc)).astimezone(ZoneInfo("Africa/Cairo"))
+    items = " ، ".join(
+        f"{ln.item_name}{_variant_part(ln)} × {_qty_text(ln)}" for ln in lines)
+    return {"time": when.strftime("%Y-%m-%d %H:%M"), "order_id": str(order.id)[:8],
+            "customer": customer.name if customer is not None else "-",
+            "phone": (customer.phone or "") if customer is not None else "",
+            "method": "دليفري" if delivery else "استلام",
+            "address": notes.split(" - ", 1)[1] if delivery and " - " in notes else "",
+            "items": items, "total": _money(order.total), "by": by}
+
+
 def forward(db: Session, order: Order, customer, lines: list[OrderLine], by: str) -> None:
     """Queue the kitchen (items only) and accounts (totals) messages of a confirmed order.
     Env lists when set, otherwise the owner chats (one person plays every role for now);
@@ -98,6 +115,8 @@ def forward(db: Session, order: Order, customer, lines: list[OrderLine], by: str
         _queue(db, cid, kitchen_text(order, lines))
     for cid in settings.accounts_telegram_chats or owners:
         _queue(db, cid, accounts_text(order, lines, customer, by))
+    if sheet_log.enabled():
+        db.info.setdefault("order_sheet", []).append(sheet_row(order, lines, customer, by))
 
 
 def handle(db: Session, link: TelegramLink | None, chat_id: int,

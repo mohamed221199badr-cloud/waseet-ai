@@ -16,6 +16,7 @@ import httpx
 from app.chat import menu_buttons, reminders
 from app.config import settings
 from app.db import SessionLocal
+from app.notify import sheet_log
 from app.telegram.service import handle_update
 
 log = logging.getLogger("waseet.telegram")
@@ -156,6 +157,9 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
         finally:
             db.close()
         for rep in replies:
+            if rep.sheet_row:  # never raises; must not stop the Telegram replies
+                sheet_log.append_row(rep.sheet_row)
+                continue
             try:
                 if rep.answer_callback_id is not None:
                     client.answer_callback_query(rep.answer_callback_id)

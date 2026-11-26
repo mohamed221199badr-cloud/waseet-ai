@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # WhatsApp sending needs a Cloud API sender (not built yet); the list is read here.
     cashier_telegram_chat_ids: str = ""
     cashier_whatsapp_numbers: str = ""
+    sheet_webhook_url: str = ""     # SHEET_WEBHOOK_URL, secret (Apps Script web app)
+    sheet_webhook_token: str = ""   # SHEET_WEBHOOK_TOKEN, secret
     # ORDER_AUTO_CONFIRM=false brings back the cashier ✅/❌ step (and its reminders)
     order_auto_confirm: bool = True
     kitchen_telegram_chat_ids: str = ""    # confirmed orders: items only
