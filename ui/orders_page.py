@@ -43,12 +43,15 @@ def _live_orders() -> None:
     st.button("🔄 تحديث")
     orders = api.board_orders(day, code)
     pending = [o for o in orders if o["status"] == "pending"]
-    # The alert follows all pending orders (fresh ones) whatever filter is on screen.
-    todays = api.board_orders("all", "pending")
-    new = alert.fresh_pending(todays)
+    # The alert follows every new order (any filter on screen) until the cashier acknowledges.
+    acked = st.session_state.setdefault("acked_orders", set())
+    new = alert.ringing(api.board_orders("all", None), acked)
     alert.render(len(new))
     if new:
-        st.error(f"🔔 طلب جديد مستني: {len(new)}")
+        st.error(f"🔔 طلب جديد: {len(new)}")
+        if st.button("🔕 استلمت (وقّف الصوت)", key="ack-orders"):
+            acked.update(o["id"] for o in new)
+            st.rerun(scope="fragment")
     if pending:
         st.warning(f"في {len(pending)} طلب مستني الكاشير (فيه صنف سعره عند الكاشير).")
     st.caption(f"{len(orders)} طلب")
