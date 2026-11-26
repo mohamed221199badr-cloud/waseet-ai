@@ -154,11 +154,13 @@ def test_every_screen_has_a_back_button(db_session, linked, _menu):  # noqa: F81
     # ---- checkout: delivery needs an address, pickup, cancel, final ----
     w.tap(cb_codec.build("cart"))
     w.tap(cb_codec.build("cok"))
+    w.tap(cb_codec.build("ckgo"))
     w.tap(cb_codec.build("ckdel", "delivery"))
     w.say("ab")                                        # address too short
     w.say("شارع 9، المعادي، جنب الصيدلية")
     w.tap(cb_codec.build("ckno"))
     w.tap(cb_codec.build("cok"))
+    w.tap(cb_codec.build("ckgo"))
     w.tap(cb_codec.build("ckdel", "pickup"))
     w.tap(cb_codec.build("ckok"))                      # post-order (allowed)
     w.tap(cb_codec.build("done"))
@@ -200,6 +202,7 @@ def test_cashier_screens_have_back_where_a_parent_exists(db_session, linked, _me
     w = Walker(db_session)
     _fill_cart(db_session, _menu)
     w.tap(cb_codec.build("cok"))
+    w.tap(cb_codec.build("ckgo"))
     w.tap(cb_codec.build("ckdel", "pickup"))
     reps = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok"), 42))
     notice = next(r for r in reps if r.chat_id == 777001)
@@ -220,7 +223,8 @@ def test_phone_step_has_a_back_button_and_it_returns_to_the_cart(db_session, lin
     db_session.commit()
     w = Walker(db_session)
     _fill_cart(db_session, _menu)
-    rep = w.tap(cb_codec.build("cok"))
+    w.tap(cb_codec.build("cok"))
+    rep = w.tap(cb_codec.build("ckgo"))
     assert "محتاجين رقمك" in rep.text
     assert any(btn.get("text") == "🔙 رجوع" for row in rep.reply_keyboard for btn in row)
     back = w.say("🔙 رجوع")
@@ -236,6 +240,7 @@ def test_back_from_checkout_screen_leaves_checkout(db_session, linked, _menu):  
     w = Walker(db_session)
     _fill_cart(db_session, _menu)
     w.tap(cb_codec.build("cok"))
+    w.tap(cb_codec.build("ckgo"))
     w.tap(cb_codec.build("ckdel", "delivery"))        # address asked, checkout step open
     link = db_session.scalar(select(TelegramLink).where(TelegramLink.chat_id == CHAT))
     assert checkout.active(db_session, link)

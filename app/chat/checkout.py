@@ -35,6 +35,7 @@ from app.models_orders import Customer, OrderException, TelegramLink
 MSG_PHONE = "محتاجين رقمك عشان نأكد الطلب."
 BTN_SHARE_CONTACT = "📱 مشاركة رقم الموبايل"
 MSG_DELIVERY_TYPE = "الطلب دليفري ولا استلام؟"
+MSG_ADD_MORE = "عايز تضيف حاجة تانية؟"
 MSG_ADDRESS_ASK = "اكتب العنوان بالتفصيل (المنطقة، الشارع، علامة مميزة)."
 MSG_ADDRESS_BAD = "العنوان قصير أوي. اكتبه بالتفصيل لو سمحت."
 MSG_ADDRESS_REUSE = "هتستلم على العنوان السابق؟\n{address}"
@@ -53,7 +54,7 @@ _CONTACT_KEYBOARD = [[{"text": BTN_SHARE_CONTACT, "request_contact": True}],
 _BACK_CART_ROWS = [[("🔙 رجوع", callbacks.build("cart"))]]
 _METHOD_LABEL = {"delivery": "دليفري 🛵", "pickup": "استلام من المحل 🏪"}
 
-CALLBACK_ACTIONS = ("cok", "ckdel", "ckaddr", "ckok", "ckno")
+CALLBACK_ACTIONS = ("cok", "ckgo", "ckdel", "ckaddr", "ckok", "ckno")
 
 _STEP_KEYS = ("checkout_step", "temp_delivery_type", "temp_address")
 
@@ -223,6 +224,19 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         ui["msg_id"] = msg_id
 
     if cb.action == "cok":
+        # «تأكيد الطلب» first asks whether to add more; an empty cart goes to begin's
+        # empty-cart screen
+        if not menu_buttons._ok_lines(lines):
+            return begin(db, link, edit_id=msg_id)
+        _clear_checkout(ui)
+        menu_buttons._save(db, session, ui)
+        return _spec(MSG_ADD_MORE,
+                     rows=[[("➕ أضيف صنف", callbacks.build("cadd")),
+                            ("✅ كمّل الطلب", callbacks.build("ckgo"))],
+                           [("🔙 رجوع", callbacks.build("cart"))]],
+                     edit_id=msg_id)
+
+    if cb.action == "ckgo":
         return begin(db, link, edit_id=msg_id)
 
     if not ui.get("checkout_step"):

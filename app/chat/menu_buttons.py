@@ -253,7 +253,6 @@ def _cart_text(db: Session, link: TelegramLink, cat, lines: list[dict]) -> str:
 def _cart_rows() -> list[list[tuple[str, str]]]:
     return [
         [("✅ تأكيد الطلب", callbacks.build("cok"))],
-        [("➕ أضف صنف", callbacks.build("cadd"))],
         [("🧹 إفراغ السلة", callbacks.build("cclr"))],
         [("❌ إلغاء الطلب", callbacks.build("ccancel"))],
         [("🔙 رجوع", callbacks.build("cats"))],

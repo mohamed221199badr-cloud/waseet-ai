@@ -26,6 +26,7 @@ Actions:
     srch                      global menu search (from the main menu)
     ckdel:<delivery|pickup>   checkout: delivery-type choice
     ckaddr:<keep|change>      checkout: reuse the saved address?
+    ckgo                      checkout: «كمّل الطلب» after the add-more question
     ckok                      checkout: final confirm, send to the cashier
     ckno                      checkout: cancel checkout, keep the cart
     oky:<order> / orj:<order> / orr:<order>:<na|far|no>   cashier confirm / reject / reason
@@ -91,7 +92,7 @@ _ARITY = {
     "npd": 1, "npdot": 0, "npb": 0, "npc": 0, "dv": 1,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
     "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0, "addr": 0, "home": 0, "done": 0,
-    "srch": 0, "ckdel": 1, "ckaddr": 1, "ckok": 0, "ckno": 0,
+    "srch": 0, "ckdel": 1, "ckaddr": 1, "ckok": 0, "ckno": 0, "ckgo": 0,
     "oky": 1, "orj": 1, "orr": 2, "orb": 1,
 }
 

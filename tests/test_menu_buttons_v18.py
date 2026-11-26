@@ -135,7 +135,7 @@ def test_full_button_flow_to_draft_order(db_session, linked, menu):  # noqa: F81
     assert "✅ تأكيد الطلب" in _flat(rep.button_rows)
     # step 4: confirm starts checkout (phone is on file -> delivery type first);
     # pickup skips the address, final confirm sends the order to the cashier
-    rep = tap(db_session, cb_codec.build("cok"))
+    rep = tap(db_session, cb_codec.build("ckgo"))
     assert "دليفري ولا استلام" in rep.text and rep.edit_message_id == 42
     assert db_session.scalar(select(Order)) is None
     rep = tap(db_session, cb_codec.build("ckdel", "pickup"))
