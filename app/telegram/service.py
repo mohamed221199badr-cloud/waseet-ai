@@ -14,6 +14,7 @@ Security rules:
 """
 
 import hashlib
+import re as _re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -58,6 +59,23 @@ MSG_TOO_MANY = "عدد البنود كبير. قسّم الطلب لأكتر م�
 class Reply:
     chat_id: int
     text: str
+    buttons: list[tuple[str, str]] | None = None   # (label, callback_data) inline keyboard
+    answer_callback_id: str | None = None          # callback_query id to acknowledge
+
+# Pinned callback_data format (slice A, no LLM). Every value matches this whitelist and is
+# validated against the linked business's own data before it does anything:
+#   cat_<PREFIX>      list a category's items as buttons (PREFIX from the SKU trial map)
+#   buy_<product_id>  start ordering that item (same as typing its exact name)
+#   pick_<product_id> answer the open "which item did you mean?" question
+#   pick_none         none of the offered candidates
+#   view_cart         show the current draft without changing it
+#   cart_confirm/cart_cancel  same as «تمام»/«الغي», MSG_STALE when no draft is open
+#   list_products     same as typing «الأصناف»
+# var_<variant_id> from his spec arrives only with Phase 2 menu variants; the Phase 1
+# products table has no variant ids, so candidate buttons carry product ids.
+_CALLBACK_WHITELIST = _re.compile(
+    r"^(cat_[A-Z]{2,5}|buy_[0-9a-fA-F-]{36}|pick_([0-9a-fA-F-]{36}|none)"
+    r"|view_cart|cart_confirm|cart_cancel|list_products)$")
 
 
 def hash_code(code: str) -> str:
@@ -145,10 +163,63 @@ def _handle_order(db: Session, link: TelegramLink, text: str) -> str:
     return _order_reply(order, results)
 
 
+def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None]:
+    """One inline-button tap. Returns (chat_id, reply text); both None means ignore.
+    callback_data is untrusted input: it must match the whitelist and reference the
+    linked business's own data (the agent re-checks product ownership)."""
+    data = cq.get("data")
+    msg = cq.get("message") or {}
+    chat = msg.get("chat") or {}
+    sender = cq.get("from") or {}
+    chat_id = chat.get("id")
+    if (chat.get("type") != "private" or not isinstance(chat_id, int)
+            or sender.get("is_bot") or not isinstance(data, str)):
+        return None, None
+    if not _CALLBACK_WHITELIST.match(data):
+        return chat_id, None  # unknown or malformed: acknowledge, do nothing
+    link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+    if link is None:
+        return chat_id, MSG_NOT_LINKED
+    if data == "cart_confirm":
+        return chat_id, chat_agent.handle_confirm(db, link)
+    if data == "cart_cancel":
+        return chat_id, chat_agent.handle_cancel(db, link)
+    if data == "view_cart":
+        return chat_id, chat_agent.cart_text(db, link)
+    if data == "list_products":
+        return chat_id, chat_agent.handle_message(db, link, "الأصناف")
+    if data == "pick_none":
+        return chat_id, chat_agent.handle_skip_choice(db, link)
+    if data.startswith("pick_"):
+        return chat_id, chat_agent.handle_pick(db, link, data[len("pick_"):])
+    if data.startswith("buy_"):
+        return chat_id, chat_agent.handle_buy(db, link, data[len("buy_"):])
+    return chat_id, chat_agent.category_text(db, link, data[len("cat_"):])  # cat_
+
+
 def handle_update(db: Session, update: dict) -> list[Reply]:
     """Process one Telegram update. Commits on success; the caller sends the replies."""
-    msg = update.get("message") if isinstance(update, dict) else None
     update_id = update.get("update_id") if isinstance(update, dict) else None
+    cq = update.get("callback_query") if isinstance(update, dict) else None
+    if isinstance(cq, dict) and isinstance(update_id, int):
+        inserted = db.execute(
+            pg_insert(TelegramUpdate).values(update_id=update_id)
+            .on_conflict_do_nothing().returning(TelegramUpdate.update_id)
+        ).first()
+        if inserted is None:
+            db.rollback()
+            return []
+        chat_id, text = _handle_callback(db, cq)
+        db.commit()
+        if chat_id is None:
+            return []
+        reply = Reply(chat_id, text or "", answer_callback_id=cq.get("id"))
+        if text:
+            link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
+            if link is not None:
+                reply.buttons = chat_agent.buttons_after(db, link, text)
+        return [reply]
+    msg = update.get("message") if isinstance(update, dict) else None
     if not isinstance(msg, dict) or not isinstance(update_id, int):
         return []
     chat, sender, text = msg.get("chat") or {}, msg.get("from") or {}, msg.get("text")
@@ -190,6 +261,8 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         reply = MSG_HELP
     elif settings.chat_agent_enabled:
         reply = chat_agent.handle_message(db, link, text)
+        db.commit()
+        return [Reply(chat_id, reply, buttons=chat_agent.buttons_after(db, link, reply))]
     else:
         reply = _handle_order(db, link, text)
     db.commit()

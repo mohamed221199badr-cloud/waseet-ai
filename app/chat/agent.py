@@ -51,6 +51,8 @@ MSG_AFTER_CONFIRM = "استلمنا طلبك (رقم {oid}). لسه مسودة �
 MSG_REASK_CHOICE = "ما فهمتش. اكتب رقم من القائمة، أو 0 لو مش من دول."
 MSG_REASK_QTY = "ما فهمتش الكمية. اكتب رقم بس، مثال: 3"
 MSG_REASK_CONFIRM = "اكتب «تمام» لتأكيد الطلب، أو «الغي» لإلغائه، أو ابعت صنف زيادة."
+MSG_STALE = "الاختيار ده مش مفتوح دلوقتي. ابعت طلبك تاني."
+MSG_EMPTY_CART = "السلة فاضية لسه. ابعت اللي عايزه والكمية."
 
 
 GREET = {normalize(w) for w in (
@@ -511,3 +513,153 @@ def _handle(db: Session, link: TelegramLink, text: str, prior: list) -> str:
     if len(new) > MAX_LINES:
         return "عدد البنود كبير. قسّم الطلب لأكتر من رسالة."
     return (prefix + "\n\n" if prefix else "") + _advance(db, link, session, new, products)
+
+
+# ---- inline buttons (slice A: Telegram keyboards over the rules engine, no LLM) --------
+# Trial bridge: the Phase 1 products table has no category column, so category buttons are
+# derived from the SKU prefixes the bot-trial import used. A business whose SKUs do not
+# match simply gets no category buttons. Phase 2 menu tables replace this mapping.
+_TRIAL_CATEGORY_PREFIXES: dict[str, str] = {
+    "MEAT": "🥩 اللحوم",
+    "PREP": "🥓 مصنعات وقطعات",
+    "LAMB": "🐑 الغازي والحلويات",
+    "BRGR": "🍔 برجر ميكس",
+    "CHK": "🐔 الفراخ",
+    "SVC": "🛠️ خدمات التصنيع",
+}
+MAX_BUTTONS = 10  # per message; the rest stay reachable by typing the name
+
+
+def _categories(products: dict[str, Product]) -> list[tuple[str, str]]:
+    seen = {p.sku.split("-")[0] for p in products.values() if "-" in p.sku}
+    return [(pre, label) for pre, label in _TRIAL_CATEGORY_PREFIXES.items() if pre in seen]
+
+
+def _price_label(db: Session, link: TelegramLink, p: Product) -> str:
+    if not settings.chat_show_prices:
+        return p.name
+    price, _ = orders_repo.resolve_price(db, link.business_id, link.customer_id, p)
+    return f"{p.name} - {price}ج"
+
+
+def buttons_after(db: Session, link: TelegramLink, reply: str) -> list[tuple[str, str]]:
+    """Buttons for the message the agent just produced, derived from the SAVED session
+    state (never from the text). [] when there is nothing to tap."""
+    session = _load(db, link)
+    products = _name_map(db, link.business_id)
+    if session is not None and session.state == "clarifying":
+        lines = session.draft.get("lines", [])
+        line = next((ln for ln in lines if ln["status"] in ("need_qty", "need_choice")), None)
+        if line is None or line["status"] != "need_choice":
+            return []
+        cands = [pid for pid in line["candidates"] if pid in products][:MAX_BUTTONS]
+        if not cands:
+            return []
+        buttons = [(_price_label(db, link, products[pid]), f"pick_{pid}") for pid in cands]
+        buttons.append(("مش من دول", "pick_none"))
+        return buttons
+    if session is not None and session.state == "confirming":
+        return [("✅ تأكيد الطلب", "cart_confirm"), ("❌ إلغاء", "cart_cancel"),
+                ("🛒 عرض السلة", "view_cart")]
+    if reply in GREETING_VARIANTS or reply == MSG_HELP:
+        buttons = [(label, f"cat_{pre}") for pre, label in _categories(products)]
+        buttons.append(("📋 كل الأصناف", "list_products"))
+        buttons.append(("🛒 السلة", "view_cart"))
+        return buttons
+    return []
+
+
+def _own_product(db: Session, link: TelegramLink, product_id: str) -> Product | None:
+    try:
+        pid = uuid.UUID(product_id)
+    except ValueError:
+        return None
+    p = db.scalar(select(Product).where(
+        Product.id == pid, Product.business_id == link.business_id,
+        Product.is_active.is_(True)))
+    return p
+
+
+def handle_confirm(db: Session, link: TelegramLink) -> str:
+    """The ✅ button: same as typing «تمام», but only while a confirmation is open."""
+    session = _load(db, link)
+    if session is None or session.state != "confirming":
+        return MSG_STALE
+    return handle_message(db, link, "تمام")
+
+
+def handle_cancel(db: Session, link: TelegramLink) -> str:
+    """The ❌ button: same as typing «الغي», but only while a draft exists."""
+    if _load(db, link) is None:
+        return MSG_STALE
+    return handle_message(db, link, "الغي")
+
+
+def handle_pick(db: Session, link: TelegramLink, product_id: str) -> str:
+    """A pick_ button: resolves the open need_choice question. Only a product that is one
+    of the offered candidates is accepted; anything else (stale, forged, other business)
+    gets MSG_STALE."""
+    session = _load(db, link)
+    if session is None or session.state != "clarifying":
+        return MSG_STALE
+    lines: list[dict] = copy.deepcopy(session.draft.get("lines", []))
+    line = next((ln for ln in lines if ln["status"] in ("need_qty", "need_choice")), None)
+    if line is None or line["status"] != "need_choice":
+        return MSG_STALE
+    if product_id not in line["candidates"]:
+        return MSG_STALE
+    if _own_product(db, link, product_id) is None:
+        return MSG_STALE
+    line["product_id"] = product_id
+    line["status"] = "ok" if line["qty"] and line["qty"] > 0 else "need_qty"
+    return _advance(db, link, session, lines, _name_map(db, link.business_id))
+
+
+def handle_skip_choice(db: Session, link: TelegramLink) -> str:
+    """A pick_none button: same as typing 0 on the open question."""
+    session = _load(db, link)
+    if session is None or session.state != "clarifying":
+        return MSG_STALE
+    lines: list[dict] = copy.deepcopy(session.draft.get("lines", []))
+    line = next((ln for ln in lines if ln["status"] in ("need_qty", "need_choice")), None)
+    if line is None or line["status"] != "need_choice":
+        return MSG_STALE
+    line.update(status="unresolved", reason="customer_skipped")
+    return _advance(db, link, session, lines, _name_map(db, link.business_id))
+
+
+def handle_buy(db: Session, link: TelegramLink, product_id: str) -> str:
+    """A buy_ button: identical to the customer typing the item's exact name."""
+    p = _own_product(db, link, product_id)
+    if p is None:
+        return MSG_STALE
+    return handle_message(db, link, p.name)
+
+
+def cart_text(db: Session, link: TelegramLink) -> str:
+    """view_cart: the current draft, read-only."""
+    session = _load(db, link)
+    if session is None:
+        return MSG_EMPTY_CART
+    lines: list[dict] = copy.deepcopy(session.draft.get("lines", []))
+    if not any(ln["status"] == "ok" for ln in lines):
+        return MSG_EMPTY_CART
+    return _confirmation(db, link, lines, _name_map(db, link.business_id))
+
+
+def category_text(db: Session, link: TelegramLink, prefix: str) -> str:
+    """cat_ button: this category's items, as a short list the customer can tap or type."""
+    if prefix not in _TRIAL_CATEGORY_PREFIXES:
+        return MSG_STALE
+    products = _name_map(db, link.business_id)
+    items = sorted(
+        (p for p in products.values() if p.sku.startswith(prefix + "-")),
+        key=lambda p: p.sku)
+    if not items:
+        return MSG_STALE
+    label = _TRIAL_CATEGORY_PREFIXES[prefix]
+    names = [p.name for p in items[:MAX_BUTTONS]]
+    out = [f"{label} - اكتب اللي عايزه والكمية:"] + [f"• {n}" for n in names]
+    if len(items) > MAX_BUTTONS:
+        out.append(f"ولسه {len(items) - MAX_BUTTONS} صنف، اكتب اسم اللي عايزه.")
+    return "\n".join(out)

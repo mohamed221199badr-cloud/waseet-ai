@@ -46,13 +46,22 @@ class TelegramClient:
         return data
 
     def get_updates(self, offset: int | None, timeout: int = 30) -> list[dict]:
-        params = {"timeout": timeout, "allowed_updates": ["message"]}
+        params = {"timeout": timeout, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:
             params["offset"] = offset
         return self._call("getUpdates", **params)["result"]
 
-    def send_message(self, chat_id: int, text: str) -> None:
-        self._call("sendMessage", chat_id=chat_id, text=text)
+    def send_message(self, chat_id: int, text: str,
+                     buttons: list[tuple[str, str]] | None = None) -> None:
+        params: dict = {"chat_id": chat_id, "text": text}
+        if buttons:
+            params["reply_markup"] = {"inline_keyboard": [
+                [{"text": label, "callback_data": data}] for label, data in buttons]}
+        self._call("sendMessage", **params)
+
+    def answer_callback_query(self, callback_query_id: str) -> None:
+        """Stops the client's loading spinner; no text shown to the customer."""
+        self._call("answerCallbackQuery", callback_query_id=callback_query_id)
 
 
 def process_batch(client: TelegramClient, updates: list[dict], session_factory=SessionLocal) -> int:
@@ -72,7 +81,10 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
             db.close()
         for rep in replies:
             try:
-                client.send_message(rep.chat_id, rep.text)
+                if rep.answer_callback_id is not None:
+                    client.answer_callback_query(rep.answer_callback_id)
+                if rep.text:
+                    client.send_message(rep.chat_id, rep.text, rep.buttons)
             except TelegramError as exc:
                 log.error("send failed: %s", exc)
     return offset
