@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # WhatsApp sending needs a Cloud API sender (not built yet); the list is read here.
     cashier_telegram_chat_ids: str = ""
     cashier_whatsapp_numbers: str = ""
+    # ORDER_AUTO_CONFIRM=false brings back the cashier ✅/❌ step (and its reminders)
+    order_auto_confirm: bool = True
     kitchen_telegram_chat_ids: str = ""    # confirmed orders: items only
     accounts_telegram_chat_ids: str = ""   # confirmed orders: prices and totals
 

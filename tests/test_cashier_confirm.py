@@ -24,6 +24,7 @@ OWNER = 777001
 
 @pytest.fixture(autouse=True)
 def _agent_on(monkeypatch):
+    monkeypatch.setattr(settings, "order_auto_confirm", False)  # these test the tap flow
     monkeypatch.setattr(settings, "chat_agent_enabled", True)
     monkeypatch.setattr(settings, "llm_mode", "off")
 
@@ -187,3 +188,24 @@ def test_no_reminder_once_decided_or_for_old_orders(db_session, linked, menu):  
     db_session.commit()
     _age(db_session, order, 45)
     assert reminders.due(db_session) == []                  # older than the 30 min window
+
+
+def test_auto_confirm_sends_everything_at_once(db_session, linked, menu, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(settings, "order_auto_confirm", True)
+    _owner(db_session, linked["ids"]["a"])
+    _fill_cart(db_session, menu)
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
+    order = db_session.scalar(select(Order))
+    assert order.status == "confirmed" and order.decided_at is not None
+    assert "طلبك اتأكد" in out[0].text
+    owner_texts = [r.text for r in out if r.chat_id == OWNER]
+    assert len(owner_texts) == 3
+    notice = next(r for r in out if r.chat_id == OWNER and r.text.startswith("🔔"))
+    assert not notice.button_rows and "متأكد تلقائياً" in notice.text
+    assert any(t.startswith("🍳 مطبخ") for t in owner_texts)
+    assert any(t.startswith("💰 حسابات") for t in owner_texts)
+    from app.chat import reminders
+    _age(db_session, order, 5)
+    assert reminders.due(db_session) == []       # confirmed: no reminder

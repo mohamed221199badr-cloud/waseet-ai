@@ -81,6 +81,19 @@ def _queue(db: Session, chat_id: int, text: str) -> None:
     db.info.setdefault("order_notify", []).append((chat_id, text))
 
 
+def forward(db: Session, order: Order, customer, lines: list[OrderLine], by: str) -> None:
+    """Queue the kitchen (items only) and accounts (totals) messages of a confirmed order.
+    Env lists when set, otherwise the owner chats (one person plays every role for now);
+    two clearly labelled messages so the roles stay distinguishable."""
+    owners = [o.chat_id for o in db.scalars(select(TelegramLink).where(
+        TelegramLink.business_id == order.business_id,
+        TelegramLink.is_owner.is_(True)))]
+    for cid in settings.kitchen_telegram_chats or owners:
+        _queue(db, cid, kitchen_text(order, lines))
+    for cid in settings.accounts_telegram_chats or owners:
+        _queue(db, cid, accounts_text(order, lines, customer, by))
+
+
 def handle(db: Session, link: TelegramLink | None, chat_id: int,
            parsed: callbacks.Callback, msg_id: int | None, by: str):
     """-> (text, button_rows, edit). edit=True: append text to the tapped notice and set its
@@ -114,15 +127,7 @@ def handle(db: Session, link: TelegramLink | None, chat_id: int,
         lines = _lines(db, order)
         if cust_link is not None:
             _queue(db, cust_link.chat_id, MSG_CUSTOMER_OK.format(oid=oid))
-        owners = [o.chat_id for o in db.scalars(select(TelegramLink).where(
-            TelegramLink.business_id == order.business_id,
-            TelegramLink.is_owner.is_(True)))]
-        # env list when set, otherwise the owner chats (one person plays every role for
-        # now); two clearly labelled messages so the roles stay distinguishable
-        for cid in settings.kitchen_telegram_chats or owners:
-            _queue(db, cid, kitchen_text(order, lines))
-        for cid in settings.accounts_telegram_chats or owners:
-            _queue(db, cid, accounts_text(order, lines, customer, by))
+        forward(db, order, customer, lines, by)
         return f"✅ اتأكد الطلب {oid} بواسطة {by}", None, True
     # orr: reject with a reason code
     code = parsed.args[1]

@@ -121,10 +121,10 @@ def test_single_variant_order_flow(db_session, linked, menu):  # noqa: F811
     assert "دليفري ولا استلام" in out[0].text       # checkout starts; no order yet
     assert db_session.scalar(select(Order)) is None
     out = _finish_checkout(db_session)
-    assert "اتبعت للكاشير" in out.text
+    assert "اتأكد" in out.text
     order = db_session.scalar(select(Order))
     assert order is not None and order.total == Decimal("840.00")
-    assert order.status == "pending"
+    assert order.status == "confirmed"
     lines = _lines(db_session, order)
     assert len(lines) == 1
     assert lines[0].item_name == "كفتة حاتي" and lines[0].variant_name == "عادي"
