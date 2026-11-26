@@ -93,7 +93,10 @@ def sheet_row(order: Order, lines: list[OrderLine], customer, by: str) -> dict:
     """One Google Sheet row per confirmed order (Cairo time, items on one line)."""
     notes = order.notes or ""
     delivery = notes.startswith("دليفري")
-    when = (order.decided_at or datetime.now(timezone.utc)).astimezone(ZoneInfo("Africa/Cairo"))
+    at = order.decided_at or datetime.now(timezone.utc)
+    if at.tzinfo is None:  # read back from the DB: stored as naive UTC
+        at = at.replace(tzinfo=timezone.utc)
+    when = at.astimezone(ZoneInfo("Africa/Cairo"))
     items = " ، ".join(
         f"{ln.item_name}{_variant_part(ln)} × {_qty_text(ln)}" for ln in lines)
     return {"time": when.strftime("%Y-%m-%d %H:%M"), "order_id": str(order.id)[:8],

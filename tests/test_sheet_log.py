@@ -69,3 +69,13 @@ def test_disabled_queues_nothing(db_session, linked, menu, monkeypatch):  # noqa
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
     assert not [r for r in out if r.sheet_row]
+
+
+def test_sheet_row_time_is_cairo_for_naive_utc():
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from app.chat import cashier_actions as ca
+    order = SimpleNamespace(id="6d465adf-0000", notes="", decided_at=datetime(2026, 11, 26, 12, 23),
+                            total=10)
+    assert ca.sheet_row(order, [], None, "x")["time"] == "2026-11-26 14:23"
