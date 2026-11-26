@@ -85,8 +85,13 @@ class TelegramClient:
         """Sends and returns the new message_id (stored to edit the message later),
         or None when the API reply carried no message object."""
         params: dict = {"chat_id": chat_id, "text": text}
-        markup = (self._reply_markup(reply_keyboard, remove_keyboard)
-                  or self._markup(buttons, button_rows))
+        # one reply_markup per message: an inline keyboard WINS over remove_keyboard
+        # (Telegram accepts only one markup object). The contact keyboard is
+        # one_time_keyboard, so it hides itself after use; dropping the inline
+        # buttons here was the prod bug (19793273) that stranded customers.
+        markup = self._markup(buttons, button_rows)
+        if markup is None:
+            markup = self._reply_markup(reply_keyboard, remove_keyboard)
         if markup:
             params["reply_markup"] = markup
         result = self._call("sendMessage", **params)["result"]

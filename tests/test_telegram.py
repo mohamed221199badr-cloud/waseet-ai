@@ -296,3 +296,31 @@ def test_m4_migration_step_down_and_up(scratch_url):  # noqa: F811
     assert not (m4 & set(inspect(eng).get_table_names()))
     assert _alembic(scratch_url, "upgrade", "head").returncode == 0
     eng.dispose()
+
+
+def test_inline_keyboard_wins_over_remove_keyboard():  # hotfix 19793273
+    """The onboarding delivery step carries BOTH remove_keyboard and inline rows:
+    Telegram takes one reply_markup, and dropping the inline buttons stranded
+    customers. The inline keyboard must be the one sent."""
+    import json
+
+    seen = {}
+
+    def capture(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 5}})
+
+    c = mock_client(capture)
+    c.send_message(1, "pick", button_rows=[[("🚚 توصيل", "dv:delivery")]],
+                   remove_keyboard=True)
+    assert "inline_keyboard" in seen["reply_markup"]
+    assert "remove_keyboard" not in seen["reply_markup"]
+
+    seen.clear()
+    c.send_message(1, "done", remove_keyboard=True)  # no inline rows: remove applies
+    assert seen["reply_markup"] == {"remove_keyboard": True}
+
+    seen.clear()
+    c.send_message(1, "phone?", reply_keyboard=[[{"text": "share", "request_contact": True}]])
+    assert seen["reply_markup"]["keyboard"][0][0]["request_contact"] is True
+    assert seen["reply_markup"]["one_time_keyboard"] is True

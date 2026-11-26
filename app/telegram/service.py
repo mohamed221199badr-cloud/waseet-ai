@@ -474,8 +474,13 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
                 if onboarding.wants_address(db, link):
                     step = onboarding.handle_address_text(db, link, text)
                 else:
-                    # not the address step: any text re-shows the current step
-                    step = onboarding.current_step(db, link)
+                    # typed answers work too (hotfix 19793273), anything else
+                    # re-shows the current step
+                    method = onboarding.delivery_answer(text)
+                    if method is not None:
+                        step = onboarding.handle_delivery_choice(db, link, method)
+                    else:
+                        step = onboarding.current_step(db, link)
                 db.commit()
                 return [_step_reply(chat_id, step)]
             if menu_buttons.wants_text(db, link):
