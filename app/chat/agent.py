@@ -383,7 +383,13 @@ def _history(link) -> list[tuple[str, str]]:
 
 
 def handle_message(db: Session, link: TelegramLink, text: str) -> str:
-    """One customer message -> one reply. The caller commits."""
+    """One customer message -> one reply. The caller commits.
+
+    Phase 2 cutover: a business whose menu tables are populated talks to the menu agent
+    (same rules engine, variant-aware); everyone else stays on this legacy products path."""
+    from app.chat import menu_agent, menu_catalog
+    if menu_catalog.has_menu(db, link.business_id):
+        return menu_agent.handle_message(db, link, text)
     prior = _history(link) if llm.open_mode() else []
     reply = _handle(db, link, text, prior)
     if llm.open_mode():
