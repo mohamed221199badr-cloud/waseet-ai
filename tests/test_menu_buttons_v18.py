@@ -143,8 +143,8 @@ def test_full_button_flow_to_draft_order(db_session, linked, menu):  # noqa: F81
     assert "✅ تأكيد وإرسال للكاشير" in _flat(rep.button_rows)
     rep = tap(db_session, cb_codec.build("ckok"))
     order = db_session.scalar(select(Order).order_by(Order.created_at.desc()))
-    assert order is not None and order.status == "pending"
-    assert "اتبعت للكاشير" in rep.text
+    assert order is not None and order.status == "confirmed"
+    assert "اتأكد" in rep.text
 
 
 def test_multi_variant_item_shows_variant_buttons(db_session, linked, menu):  # noqa: F811

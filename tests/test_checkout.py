@@ -1,6 +1,6 @@
 """Checkout (WhatsApp spec 2026-11-26): no onboarding at /start; phone, delivery
 type and address are collected at checkout after the cart confirm, then a final
-summary sends the order to the cashier (status pending on main)."""
+summary sends the order to the cashier (auto-confirmed by default)."""
 
 import pytest
 from sqlalchemy import select
@@ -97,9 +97,9 @@ def test_checkout_collects_phone_delivery_address(db_session, linked_new, menu):
     assert "✅ تأكيد وإرسال للكاشير" in _flat(rep.button_rows)
     # final confirm: pending order, CRM persisted, cart cleared
     rep = tap(db_session, cb_codec.build("ckok"))
-    assert "اتبعت للكاشير" in rep.text
+    assert "اتأكد" in rep.text
     order = db_session.scalar(select(Order))
-    assert order is not None and order.status == "pending"
+    assert order is not None and order.status == "confirmed"
     assert "دليفري" in (order.notes or "") and "شارع 9" in (order.notes or "")
     cust = _customer(db_session, linked_new)
     assert cust.delivery_method == "delivery" and cust.address.startswith("شارع 9")
@@ -115,9 +115,9 @@ def test_pickup_skips_phone_and_address(db_session, linked, menu):  # noqa: F811
     assert "مراجعة الطلب النهائي" in rep.text
     assert "استلام من المحل" in rep.text and "العنوان" not in rep.text
     rep = tap(db_session, cb_codec.build("ckok"))
-    assert "اتبعت للكاشير" in rep.text
+    assert "اتأكد" in rep.text
     order = db_session.scalar(select(Order))
-    assert order.status == "pending" and "استلام من المحل" in (order.notes or "")
+    assert order.status == "confirmed" and "استلام من المحل" in (order.notes or "")
     cust = _customer(db_session, linked)
     assert cust.delivery_method == "pickup"
 
@@ -289,7 +289,7 @@ def test_confirm_with_same_variant_added_twice_creates_one_summed_line(
     tap(db_session, cb_codec.build("cok"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     rep = tap(db_session, cb_codec.build("ckok"))
-    assert "اتبعت للكاشير" in rep.text
+    assert "اتأكد" in rep.text
     rows = db_session.scalars(select(OrderLine)).all()
     assert len(rows) == 1 and rows[0].quantity == 3
 
@@ -314,9 +314,9 @@ def test_typed_finish_word_confirms_only_at_final_step(db_session, linked, menu)
     assert db_session.scalar(select(Order)) is None
     tap(db_session, cb_codec.build("ckdel", "pickup"))     # final review
     out = _say(db_session, "إنهاء")
-    assert "جاري التنفيذ" in out[0].text and "رقم الطلب" in out[0].text
+    assert "جاري تجهيزه" in out[0].text and "رقم الطلب" in out[0].text
     order = db_session.scalar(select(Order))
-    assert order.status == "pending"
+    assert order.status == "confirmed"
     again = _say(db_session, "تمام")                       # no second order
     assert len(db_session.scalars(select(Order)).all()) == 1
     assert again is not None
@@ -334,11 +334,11 @@ def test_confirmed_order_notifies_owner_chats(db_session, linked, menu):  # noqa
     tap(db_session, cb_codec.build("cok"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
-    notes = [r for r in out if r.chat_id == 777001]
+    notes = [r for r in out if r.chat_id == 777001 and r.text.startswith("🔔")]
     assert len(notes) == 1
     assert "طلب جديد" in notes[0].text and "مفروم احمر" in notes[0].text
     assert "استلام" in notes[0].text
-    assert "جاري التنفيذ" in out[0].text
+    assert "جاري تجهيزه" in out[0].text
 
 
 def test_cashier_chat_ids_from_config_get_the_notice(db_session, linked, menu, monkeypatch):  # noqa: F811

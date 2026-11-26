@@ -20,15 +20,17 @@ OrderExceptions, audit) with status "pending" — main's cashier-visible state.
 and VARCHAR(20) reject it on main. Switch the status argument when that merges.)
 """
 
-from sqlalchemy import select
+from datetime import datetime, timezone
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
 from app.chat import agent as legacy
-from app.chat import callbacks, menu_agent, menu_buttons, onboarding
+from app.chat import callbacks, cashier_actions, menu_agent, menu_buttons, onboarding
 from app.config import settings
 from app.matching.normalize import normalize
-from app.models_orders import Customer, TelegramLink
+from app.models_orders import Customer, OrderException, TelegramLink
 
 MSG_PHONE = "محتاجين رقمك عشان نأكد الطلب."
 BTN_SHARE_CONTACT = "📱 مشاركة رقم الموبايل"
@@ -37,6 +39,7 @@ MSG_ADDRESS_ASK = "اكتب العنوان بالتفصيل (المنطقة، ا
 MSG_ADDRESS_BAD = "العنوان قصير أوي. اكتبه بالتفصيل لو سمحت."
 MSG_ADDRESS_REUSE = "هتستلم على العنوان السابق؟\n{address}"
 MSG_DONE = "تمام ✅ طلبك اتبعت للكاشير وجاري التنفيذ.\nرقم الطلب: {oid}"
+MSG_DONE_CONFIRMED = "طلبك اتأكد ✅ وجاري تجهيزه.\nرقم الطلب: {oid}"
 # typed words that confirm the order, honoured ONLY at the final-confirm step
 FINISH = {normalize(w) for w in ("تمام", "تم", "إنهاء", "انهاء", "إنهاء الطلب",
                                        "انهاء الطلب", "خلصت", "تمام خلصت", "خلاص",
@@ -256,7 +259,8 @@ MSG_CASHIER = ("🔔 طلب جديد رقم {oid}\n"
 
 
 def _queue_cashier_notice(db: Session, link: TelegramLink, customer, order,
-                          lines: list[dict], method: str, address: str) -> None:
+                          lines: list[dict], method: str, address: str,
+                          buttons: bool = True) -> None:
     """Immediate message to every owner chat (the shop's cashier/owner links) when an
     order is confirmed. Sent by the worker after the customer's reply."""
     cat = menu_buttons.load_catalog(db, link.business_id)
@@ -272,7 +276,13 @@ def _queue_cashier_notice(db: Session, link: TelegramLink, customer, order,
         TelegramLink.is_owner.is_(True))).all()
     chat_ids = list(dict.fromkeys(
         [o.chat_id for o in owners] + settings.cashier_telegram_chats))
-    db.info.setdefault("order_notify", []).extend((cid, text) for cid in chat_ids)
+    if not buttons:
+        text = text.replace("🔔 طلب جديد رقم", "🔔 طلب جديد (متأكد تلقائياً ✅) رقم", 1)
+    if buttons:
+        rows = cashier_actions.notice_rows(order.id)
+        db.info.setdefault("order_notify", []).extend((cid, text, rows) for cid in chat_ids)
+    else:
+        db.info.setdefault("order_notify", []).extend((cid, text) for cid in chat_ids)
 
 
 def _finalize(db: Session, link: TelegramLink, session, ui: dict,
@@ -290,13 +300,26 @@ def _finalize(db: Session, link: TelegramLink, session, ui: dict,
     cat = menu_buttons.load_catalog(db, link.business_id)
     order = menu_agent._create_order(db, link, cat, lines, status="pending",
                                      notes=notes[:500])
+    # auto-confirm (default): the order is confirmed the moment the customer sends it,
+    # unless a line could not be priced (an open exception): that one stays pending for
+    # the cashier's ✅/❌ and reminders
+    open_exc = db.scalar(select(func.count()).select_from(OrderException).where(
+        OrderException.order_id == order.id)) or 0
+    auto = settings.order_auto_confirm and open_exc == 0
+    if auto:
+        order.status = "confirmed"
+        order.decided_at = datetime.now(timezone.utc)
     write_audit(db, business_id=link.business_id, entity="order",
                 entity_id=str(order.id), action="checkout",
-                payload={"status": "pending", "delivery_method": method,
-                         "has_address": bool(address)})
-    _queue_cashier_notice(db, link, customer, order, lines, method, address)
+                payload={"status": order.status, "delivery_method": method,
+                         "has_address": bool(address), "auto_confirmed": auto})
+    _queue_cashier_notice(db, link, customer, order, lines, method, address,
+                          buttons=not auto)
+    if auto:
+        cashier_actions.forward(db, order, customer,
+                                cashier_actions._lines(db, order), "تلقائي")
     legacy._clear(db, session)  # spec: clear the session draft on final confirm
-    return _spec(MSG_DONE.format(oid=str(order.id)[:8]),
+    return _spec((MSG_DONE_CONFIRMED if auto else MSG_DONE).format(oid=str(order.id)[:8]),
                  rows=[[("✅ تمام، خلصت", callbacks.build("done"))],
                        [("🛒 طلب جديد", callbacks.build("cats"))]],
                  remove_keyboard=True, edit_id=edit_id)
