@@ -9,3 +9,4 @@ class TelegramLinkRead(BaseModel):
     customer_id: uuid.UUID
     customer_name: str
     created_at: datetime
+    is_owner: bool = False

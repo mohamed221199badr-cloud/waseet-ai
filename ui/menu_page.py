@@ -1,23 +1,17 @@
-"""Menu screen (Phase 1, 1.6). Data-entry only: the bot keeps quoting `products`
-until the Phase 2 cutover (B2), which is why the banner is always on."""
+"""Menu screen: items, availability, default price, new item, CSV import. The Telegram
+bot reads this menu directly."""
 
 import streamlit as st
-
-BANNER = "وضع التجهيز: البوت لسه بيستخدم قايمة المنتجات القديمة لحد التحويل (Phase 2)."
 
 
 def menu_page() -> None:
     api = st.session_state.api
     st.title("المنيو")
-    st.warning(BANNER)
-    tab_items, tab_import, tab_diff = st.tabs(
-        ["الأصناف", "استيراد CSV", "فرق المنيو عن المنتجات"])
+    tab_items, tab_import = st.tabs(["الأصناف", "استيراد CSV"])
     with tab_items:
         _items_tab(api)
     with tab_import:
         _import_tab(api)
-    with tab_diff:
-        _diff_tab(api)
 
 
 def _items_tab(api) -> None:
@@ -93,18 +87,3 @@ def _show_import_result(result, verb) -> None:
     else:
         st.success(f"{verb}: {result['created']} جديد، {result['updated']} متحدث، "
                    f"{result['unchanged']} بدون تغيير")
-
-
-def _diff_tab(api) -> None:
-    st.caption("مقارنة للقراءة فقط: المنيو الجديد مقابل ما يقوله البوت فعلاً من قايمة "
-               "المنتجات القديمة.")
-    rows = api.menu_diff()
-    if not rows:
-        st.success("مفيش فروق.")
-        return
-    label = {"only_in_menu": "في المنيو بس", "only_in_products": "في المنتجات بس",
-             "price_differs": "سعر مختلف"}
-    for r in rows:
-        st.write(f"- {r['item']}: {label[r['kind']]}"
-                 f" (المنيو: {r['menu_price'] or '—'}، المنتجات: "
-                 f"{r['product_price'] or '—'})")

@@ -31,7 +31,7 @@ def list_links(
     )
     return [
         TelegramLinkRead(id=link.id, customer_id=link.customer_id, customer_name=name,
-                         created_at=link.created_at)
+                         created_at=link.created_at, is_owner=link.is_owner)
         for link, name in rows
     ]
 

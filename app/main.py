@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.api.routes import (
     auth,
+    board,
     chat,
     customers,
     health,
@@ -27,3 +28,4 @@ app.include_router(orders.router, prefix="/api/v1")
 app.include_router(intake.router, prefix="/api/v1")
 app.include_router(telegram.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(board.router, prefix="/api/v1")

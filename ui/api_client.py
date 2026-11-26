@@ -1,5 +1,5 @@
 """Thin client for the Waseet API. The Streamlit screen talks to the backend ONLY through
-this class (JWT bearer), so every rule (tenancy, exceptions, stock) stays on the server."""
+this class (JWT bearer), so every rule (tenancy, roles, prices) stays on the server."""
 
 import os
 
@@ -77,30 +77,23 @@ class ApiClient:
         self.refresh_token = data.get("refresh_token")
 
     def me(self): return self._req("GET", "/auth/me")
-    def customers(self): return self._req("GET", "/customers")
-    def products(self): return self._req("GET", "/products")
-    def orders(self, status: str): return self._req("GET", "/orders", params={"status": status})
-    def submit(self, oid): return self._req("POST", f"/orders/{oid}/submit")
-    def confirm(self, oid): return self._req("POST", f"/orders/{oid}/confirm")
+    # dashboard v2: the orders the Telegram bot creates
+    def board_orders(self, day: str = "today", status: str | None = None):
+        params = {"day": day, **({"status": status} if status else {})}
+        return self._req("GET", "/board/orders", params=params)
 
-    def reject(self, oid, reason: str | None = None):
-        return self._req("POST", f"/orders/{oid}/reject", json={"reason": reason or None})
+    def board_summary(self, day: str = "today"):
+        return self._req("GET", "/board/summary", params={"day": day})
 
-    def resolve(self, oid, eid, product_id, quantity: int | None = None):
-        return self._req("POST", f"/orders/{oid}/exceptions/{eid}/resolve",
-                         json={"product_id": product_id, "quantity": quantity})
+    def board_customers(self): return self._req("GET", "/board/customers")
+    def board_confirm(self, oid): return self._req("POST", f"/board/orders/{oid}/confirm")
 
-    def dismiss(self, oid, eid, note: str):
-        return self._req("POST", f"/orders/{oid}/exceptions/{eid}/dismiss",
-                         json={"note": note})
+    def board_reject(self, oid, reason: str | None = None):
+        return self._req("POST", f"/board/orders/{oid}/reject", json={"reason": reason or None})
 
     def links(self): return self._req("GET", "/telegram/links")
     def revoke_link(self, link_id): return self._req("DELETE", f"/telegram/links/{link_id}")
-    def chat(self, customer_id, text):
-        return self._req("POST", "/chat/message", json={"customer_id": customer_id, "text": text})
-
-    def chat_reset(self, customer_id):
-        return self._req("POST", "/chat/reset", json={"customer_id": customer_id, "text": "x"})
+    def mark_owner(self, link_id): return self._req("POST", f"/telegram/links/{link_id}/owner")
 
     # Phase 1: menu + staff
     def menu_items(self): return self._req("GET", "/menu/items")
@@ -119,7 +112,6 @@ class ApiClient:
         return self._req("POST", "/menu/import",
                          json={"csv_text": csv_text, "dry_run": dry_run})
 
-    def menu_diff(self): return self._req("GET", "/menu/diff-report")
     def staff(self): return self._req("GET", "/staff")
     def create_staff(self, body: dict): return self._req("POST", "/staff", json=body)
     def deactivate_staff(self, staff_id): return self._req("POST", f"/staff/{staff_id}/deactivate")
