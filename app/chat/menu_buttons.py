@@ -223,7 +223,8 @@ def _cart_text(db: Session, link: TelegramLink, cat, lines: list[dict]) -> str:
         if item is None or variant is None:
             continue
         qty = Decimal(str(ln["qty"]))
-        qty_txt = f"{qty.normalize()} كيلو" if item.sold_by == "weight" else f"{qty.normalize()}"
+        q = menu_agent._qty(qty)  # never exponent notation (10.0 -> "10", not "1E+1")
+        qty_txt = f"{q} كيلو" if item.sold_by == "weight" else q
         price, _src = resolve_variant_price(db, link.business_id, link.customer_id,
                                             variant)
         if price is None:

@@ -234,6 +234,16 @@ def test_global_search_from_main_menu(db_session, linked, menu):  # noqa: F811
     assert "✅ تأكيد" in _flat(rep.button_rows)
 
 
+def test_cart_qty_never_scientific_notation(db_session, linked, menu):  # noqa: F811
+    # qty 10 (a float 10.0 in the draft) renders "10", never "1E+1" (19838529)
+    tap(db_session, cb_codec.build("cat", "اللحوم", "p0"))
+    tap(db_session, cb_codec.build("it", menu["meat"].id))
+    tap(db_session, cb_codec.build("npd", 1))
+    tap(db_session, cb_codec.build("npd", 0))
+    rep = tap(db_session, cb_codec.build("npc"))
+    assert "10 كيلو" in rep.text and "1E+1" not in rep.text
+
+
 def test_global_search_no_results(db_session, linked, menu):  # noqa: F811
     tap(db_session, cb_codec.build("srch"))
     rep = _say(db_session, "سمك مشوي")[0]
