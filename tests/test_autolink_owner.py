@@ -89,19 +89,17 @@ def _link(db, chat_id):
 
 def test_first_message_auto_links_and_welcomes(db_session, menu):  # noqa: F811
     out = svc.handle_update(db_session, _text(CHAT, "اهلا"))
-    # onboarding (F2) comes before the welcome: a brand-new customer has no phone
-    assert "رقم تليفونك" in out[0].text
-    assert out[0].reply_keyboard[0][0]["request_contact"] is True
+    # no onboarding gate (checkout spec 2026-11-26): the main menu directly
+    assert "أهلاً وسهلاً" in out[0].text
+    labels = [lbl for row in out[0].button_rows for lbl, _ in row]
+    assert "🔍 بحث" in labels and "🛒 السلة" in labels
     link = _link(db_session, CHAT)
     assert link is not None and link.business_id == menu["ids"]["a"]
     cust = db_session.get(Customer, link.customer_id)
     assert cust.telegram_chat_id == CHAT and cust.name == "زبون"
-    # completing the profile lands on the welcome screen
-    cust.phone, cust.delivery_method = "01011111111", "pickup"
-    db_session.commit()
     out = svc.handle_update(db_session, _text(CHAT, "/start"))
     assert "أهلاً وسهلاً" in out[0].text
-    assert "🛒 ابدأ الطلب" in [lbl for row in out[0].button_rows for lbl, _ in row]
+    assert "📋 عرض المنيو" in [lbl for row in out[0].button_rows for lbl, _ in row]
 
 
 def test_repeat_contact_reuses_the_same_customer(db_session, menu):  # noqa: F811
@@ -160,13 +158,13 @@ def test_start_code_repoints_auto_link_to_named_customer(db_session, client, men
 
 def test_unlinked_callback_auto_links_with_welcome(db_session, menu):  # noqa: F811
     out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("cats")))
-    # auto-linked on the tap, then gated into onboarding before any menu action
-    assert "رقم تليفونك" in out[0].text
+    # auto-linked on the tap, straight to the main menu (no onboarding gate)
+    assert "أهلاً وسهلاً" in out[0].text
     assert _link(db_session, CHAT) is not None
 
 
 def _complete_profile(db, chat_id):
-    """Onboarding (F2) gates menu actions; fill the CRM fields directly."""
+    """Fill the CRM profile fields directly (checkout collects them at order time)."""
     link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
     cust = db.get(Customer, link.customer_id)
     cust.phone, cust.delivery_method = "01022222222", "pickup"

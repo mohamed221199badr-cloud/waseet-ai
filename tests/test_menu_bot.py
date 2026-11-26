@@ -82,6 +82,26 @@ def menu(db_session, shop):  # noqa: F811
             "burger_v": burger_v, "kofta_v": kofta_v, "meat_v": meat_v, "kebiba_v": kebiba_v}
 
 
+def _cbq(chat_id, data, msg_id=42):
+    return {
+        "update_id": next(_ids),
+        "callback_query": {
+            "id": f"cbq-{next(_ids)}", "data": data,
+            "from": {"id": chat_id, "is_bot": False},
+            "message": {"message_id": msg_id,
+                        "chat": {"id": chat_id, "type": "private"}},
+        },
+    }
+
+
+def _finish_checkout(db, chat_id=500, method="pickup"):
+    """A typed «تمام» starts checkout (checkout spec 2026-11-26): pick the delivery
+    type, then final confirm. The customer has a phone, so the phone step is skipped."""
+    from app.chat import callbacks as cb_codec
+    svc.handle_update(db, _cbq(chat_id, cb_codec.build("ckdel", method)))
+    return svc.handle_update(db, _cbq(chat_id, cb_codec.build("ckok")))[0]
+
+
 def _lines(db, order):
     return db.scalars(select(OrderLine).where(OrderLine.order_id == order.id)).all()
 
@@ -98,9 +118,13 @@ def test_single_variant_order_flow(db_session, linked, menu):  # noqa: F811
     out = svc.handle_update(db_session, upd(500, "2"))
     assert "2 × كفتة حاتي = 840.00 (السعر 420.00)" in out[0].text
     out = svc.handle_update(db_session, upd(500, "تمام"))
-    assert "استلمنا طلبك" in out[0].text
+    assert "دليفري ولا استلام" in out[0].text       # checkout starts; no order yet
+    assert db_session.scalar(select(Order)) is None
+    out = _finish_checkout(db_session)
+    assert "اتبعت للكاشير" in out.text
     order = db_session.scalar(select(Order))
     assert order is not None and order.total == Decimal("840.00")
+    assert order.status == "pending"
     lines = _lines(db_session, order)
     assert len(lines) == 1
     assert lines[0].item_name == "كفتة حاتي" and lines[0].variant_name == "عادي"
@@ -116,7 +140,8 @@ def test_multi_variant_asks_then_priced_from_db(db_session, linked, menu):  # no
     assert "كام «برجر بلدي (سعر 2)»" in out[0].text
     out = svc.handle_update(db_session, upd(500, "3"))
     assert "3 × برجر بلدي (سعر 2) = 1050.00 (السعر 350.00)" in out[0].text
-    out = svc.handle_update(db_session, upd(500, "تمام"))
+    svc.handle_update(db_session, upd(500, "تمام"))
+    _finish_checkout(db_session)
     lines = _lines(db_session, db_session.scalar(select(Order)))
     assert lines[0].variant_name == "سعر 2" and lines[0].line_total == Decimal("1050.00")
 
@@ -145,6 +170,7 @@ def test_null_price_with_override_resolves(db_session, linked, shop, menu):  # n
     out = svc.handle_update(db_session, upd(500, "2"))
     assert "السعر 300.00" in out[0].text
     svc.handle_update(db_session, upd(500, "تمام"))
+    _finish_checkout(db_session)
     lines = _lines(db_session, db_session.scalar(select(Order)))
     assert lines[0].price_source == "override" and lines[0].unit_price == Decimal("300.00")
 
@@ -170,6 +196,7 @@ def test_weight_item_accepts_fraction(db_session, linked, menu):  # noqa: F811
     out = svc.handle_update(db_session, upd(500, "2.5"))
     assert "2.5 × مفروم احمر = 1125.00 (السعر 450.00)" in out[0].text
     svc.handle_update(db_session, upd(500, "تمام"))
+    _finish_checkout(db_session)
     lines = _lines(db_session, db_session.scalar(select(Order)))
     assert lines[0].quantity == Decimal("2.500") and lines[0].unit_label == "كيلو"
 
@@ -194,6 +221,7 @@ def test_kilo_word_means_one_kilo(db_session, linked, menu):  # noqa: F811
     out = svc.handle_update(db_session, upd(500, "كيلو مفروم احمر"))
     assert "1 × مفروم احمر = 450.00" in out[0].text
     svc.handle_update(db_session, upd(500, "تمام"))
+    _finish_checkout(db_session)
     lines = _lines(db_session, db_session.scalar(select(Order)))
     assert lines[0].quantity == Decimal("1.000")
 

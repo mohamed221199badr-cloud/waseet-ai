@@ -23,6 +23,11 @@ Actions:
     cclr                      ask before clearing the cart
     cclr_yes / cclr_no        clear-cart confirmation answer
     ccancel                   cancel the order flow (same as «الغي»)
+    srch                      global menu search (from the main menu)
+    ckdel:<delivery|pickup>   checkout: delivery-type choice
+    ckaddr:<keep|change>      checkout: reuse the saved address?
+    ckok                      checkout: final confirm, send to the cashier
+    ckno                      checkout: cancel checkout, keep the cart
     noop                      inert button (current page indicator)
 
 Legacy slice-A payloads (cat_<PREFIX>, buy_, pick_, view_cart, cart_confirm, ...) stay
@@ -65,6 +70,10 @@ def parse(data: str) -> Callback | None:
         return None
     if action == "dv" and args[0] not in ("delivery", "pickup"):
         return None
+    if action == "ckdel" and args[0] not in ("delivery", "pickup"):
+        return None
+    if action == "ckaddr" and args[0] not in ("keep", "change"):
+        return None
     if action in ("it",) and not _is_uuid(args[0]):
         return None
     if action in ("var",) and not _is_uuid(args[0]):
@@ -77,6 +86,7 @@ _ARITY = {
     "npd": 1, "npdot": 0, "npb": 0, "npc": 0, "dv": 1,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
     "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0,
+    "srch": 0, "ckdel": 1, "ckaddr": 1, "ckok": 0, "ckno": 0,
 }
 
 

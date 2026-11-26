@@ -132,10 +132,18 @@ def test_full_button_flow_to_draft_order(db_session, linked, menu):  # noqa: F81
     rep = tap(db_session, cb_codec.build("npc"))
     assert "مفروم احمر" in rep.text and "450" in rep.text
     assert "✅ تأكيد الطلب" in _flat(rep.button_rows)
-    # step 4: confirm creates the draft order through the shared menu_agent path
+    # step 4: confirm starts checkout (phone is on file -> delivery type first);
+    # pickup skips the address, final confirm sends the order to the cashier
     rep = tap(db_session, cb_codec.build("cok"))
+    assert "دليفري ولا استلام" in rep.text and rep.edit_message_id == 42
+    assert db_session.scalar(select(Order)) is None
+    rep = tap(db_session, cb_codec.build("ckdel", "pickup"))
+    assert "مراجعة الطلب النهائي" in rep.text and "استلام من المحل" in rep.text
+    assert "✅ تأكيد وإرسال للكاشير" in _flat(rep.button_rows)
+    rep = tap(db_session, cb_codec.build("ckok"))
     order = db_session.scalar(select(Order).order_by(Order.created_at.desc()))
-    assert order is not None and "استلمنا طلبك" in rep.text
+    assert order is not None and order.status == "pending"
+    assert "اتبعت للكاشير" in rep.text
 
 
 def test_multi_variant_item_shows_variant_buttons(db_session, linked, menu):  # noqa: F811
@@ -254,7 +262,7 @@ def _photo_upd(chat_id, sizes):
     }
 
 
-def test_start_shows_welcome_with_three_buttons(db_session, linked, menu):  # noqa: F811
+def test_start_shows_main_menu_directly(db_session, linked, menu):  # noqa: F811
     out = svc.handle_update(db_session, {
         "update_id": next(_ids),
         "message": {"message_id": 1, "text": "/start",
@@ -263,7 +271,10 @@ def test_start_shows_welcome_with_three_buttons(db_session, linked, menu):  # no
     rep = out[0]
     assert "أهلاً وسهلاً" in rep.text
     labels = _flat(rep.button_rows)
-    assert "🛒 ابدأ الطلب" in labels and "📋 عرض المنيو" in labels and "📞 تواصل معنا" in labels
+    # no onboarding gate (checkout spec 2026-11-26): categories + search + cart
+    assert any("اللحوم" in lbl for lbl in labels)
+    assert "🔍 بحث" in labels and "🛒 السلة" in labels
+    assert "📋 عرض المنيو" in labels and "📞 تواصل معنا" in labels
 
 
 def _make_owner(db, chat_id):

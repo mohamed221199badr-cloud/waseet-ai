@@ -14,6 +14,7 @@ Session ui state (inside ChatSession.draft["ui"]):
     msg_id: the bot's last menu message, for edit-in-place navigation
 """
 
+import re
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -28,6 +29,7 @@ from app.chat.menu_catalog import (
     load_catalog,
     resolve_variant_price,
 )
+from app.matching.normalize import normalize_digits
 from app.models import Business
 from app.models_orders import ChatSession, TelegramLink
 
@@ -39,6 +41,9 @@ MSG_CLEARED = "اتفضت السلة. نبدأ من الأول:"
 MSG_CART_EMPTY = "السلة فاضية لسه. اختار من الأصناف:"
 MSG_SEARCH_ASK = "🔍 اكتب اسم الصنف اللي بتدور عليه."
 MSG_SEARCH_NONE = "مفيش نتائج لـ «{query}» في قسم «{category}». جرب اسم تاني."
+MSG_SEARCH_NONE_GLOBAL = "مفيش نتائج لـ «{query}». جرب اسم تاني."
+MSG_PICK_ITEM_FIRST = ("الرقم ده كمية، بس محتاج تعرف لأي صنف 🙂\n"
+                       "اختار الصنف الأول من الأصناف تحت، وبعدها اكتب أو اضغط الكمية.")
 MSG_PRICE_REQUIRED = (
     "«{item}» سعره بيتحدد مع الكاشير، فمش هقدر أضيفه من هنا. "
     "قوله في المحل أو اختار صنف تاني."
@@ -296,6 +301,13 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         return MSG_SEARCH_ASK, [[("🔙 رجوع للقسم",
                                   callbacks.build("cat", category, f"p{page}"))]]
 
+    if cb.action == "srch":
+        # global search from the main menu: no category scope, back to the menu
+        ui.update(screen="search", search_category=None, search_page=0,
+                  waiting_for_search_query=True)
+        _save(db, session, ui)
+        return MSG_SEARCH_ASK, [[("🔙 الأصناف", callbacks.build("cats"))]]
+
     if cb.action == "it":
         item_id = cb.args[0]
         item = cat.items.get(item_id)
@@ -304,10 +316,11 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         variants = cat.variants.get(item_id, [])
         if not variants:
             return stale()
-        category = ui.get("category", "")
+        category = item.category or ui.get("category", "")
         page = int(ui.get("page", 0))
         if len(variants) > 1:
-            ui.update(screen="item", item_id=item_id, waiting_for_search_query=False)
+            ui.update(screen="item", item_id=item_id, category=category,
+                      waiting_for_search_query=False)
             _save(db, session, ui)
             return (menu_agent.MSG_VARIANT.format(item=item.name),
                     _variants_rows(cat, item_id, category, page))
@@ -319,7 +332,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
                 _variants_rows(cat, item_id, category, page) if len(variants) > 1 else \
                 _items_rows(cat, category, page)[0]
         ui.update(screen="qty", item_id=item_id, variant_id=str(variant.id),
-                  current_input="", waiting_for_search_query=False)
+                  current_input="", waiting_for_search_query=False, await_qty=True)
         _save(db, session, ui)
         return _qty_prompt(item, ""), _numpad_rows(item, item_id)
 
@@ -340,7 +353,7 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
                     _variants_rows(cat, item_id, ui.get("category", ""),
                                    int(ui.get("page", 0))))
         ui.update(screen="qty", item_id=item_id, variant_id=variant_id,
-                  current_input="", waiting_for_search_query=False)
+                  current_input="", waiting_for_search_query=False, await_qty=True)
         _save(db, session, ui)
         return _qty_prompt(item, ""), _numpad_rows(item, item_id)
 
@@ -421,18 +434,6 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         _save(db, session, ui)
         return _cart_text(db, link, cat, lines), _cart_rows()
 
-    if cb.action == "cok":
-        if not _ok_lines(lines):
-            ui.update(screen="cats")
-            _save(db, session, ui)
-            return MSG_CART_EMPTY, _cats_rows(db, link, lines)
-        # same confirmation path as the text flow (validates, prices, creates the draft
-        # order): draft lines are already in the shared shape.
-        session.state = "confirming"
-        _save(db, session, ui)
-        text = menu_agent.handle_message(db, link, "تمام")
-        return text, [[("🛒 طلب جديد", callbacks.build("cats"))]]
-
     if cb.action == "ccancel":
         reply = menu_agent.handle_message(db, link, "الغي")
         return reply.text, [[("🛒 طلب جديد", callbacks.build("cats"))]]
@@ -466,20 +467,36 @@ def _search_items(cat, category: str, query: str):
 def _handle_search(db: Session, session: ChatSession, ui: dict, cat, text: str):
     category = ui.get("search_category") or ""
     page = int(ui.get("search_page") or 0)
-    back = [[("🔙 رجوع للقسم", callbacks.build("cat", category, f"p{page}"))]]
+    if category:
+        back = [[("🔙 رجوع للقسم", callbacks.build("cat", category, f"p{page}"))]]
+    else:
+        back = [[("🔙 الأصناف", callbacks.build("cats"))]]
     query = text.strip()
     if not query:
         return MSG_SEARCH_ASK, back, ui.get("msg_id")
-    matches = _search_items(cat, category, query)
+    if category:
+        matches = [(i, category) for i in _search_items(cat, category, query)]
+    else:
+        # global (main-menu) search: every category, labeled in the buttons
+        matches = []
+        for c in list_categories(db, session.business_id):
+            matches += [(i, c.name) for i in _search_items(cat, c.name, query)]
     if not matches:
         # stay in the search state so the next text retries
         _save(db, session, ui)
-        return MSG_SEARCH_NONE.format(query=query[:100], category=category), back, \
-            ui.get("msg_id")
-    rows = [[(f"🔹 {i.name}", callbacks.build("it", i.id))]
-            for i in matches[:SEARCH_MAX_RESULTS]]
+        if category:
+            return MSG_SEARCH_NONE.format(query=query[:100], category=category), \
+                back, ui.get("msg_id")
+        return MSG_SEARCH_NONE_GLOBAL.format(query=query[:100]), back, ui.get("msg_id")
+    rows = []
+    for i, cname in matches[:SEARCH_MAX_RESULTS]:
+        label = f"🔹 {i.name}" if category else f"🔹 {i.name} · {cname}"
+        rows.append([(label, callbacks.build("it", i.id))])
     rows.append(back[0])
-    shown = f"نتائج البحث عن «{query[:100]}» في «{category}»:"
+    if category:
+        shown = f"نتائج البحث عن «{query[:100]}» في «{category}»:"
+    else:
+        shown = f"نتائج البحث عن «{query[:100]}»:"
     if len(matches) > SEARCH_MAX_RESULTS:
         shown += f" (أول {SEARCH_MAX_RESULTS} من {len(matches)})"
     _save(db, session, ui)
@@ -512,6 +529,12 @@ def handle_text(db: Session, link: TelegramLink, text: str
     ui.update(await_qty=False, screen="cart")
     _save(db, session, ui)
     return _cart_text(db, link, cat, lines), _cart_rows(), ui.get("msg_id")
+
+
+def is_bare_number(text: str) -> bool:
+    """A lone quantity (Arabic-Indic safe) with no item context (bug 19817564)."""
+    t = normalize_digits(text).strip()
+    return bool(re.fullmatch(r"\d+(\.\d+)?", t))
 
 
 def entry_rows(db: Session, link: TelegramLink) -> list[list[tuple[str, str]]]:
@@ -553,6 +576,22 @@ MSG_CONTACT = (f"📞 تواصل معنا:\n"
                f"العنوان: {SHOP_ADDRESS}\n"
                f"تليفون: {' / '.join(SHOP_PHONES)}\n"
                f"واتساب: {SHOP_WHATSAPP}")
+
+
+def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, str]]]]:
+    """The /start entry point: welcome text with the main menu directly - categories,
+    global search and the cart (checkout spec 2026-11-26: no onboarding gate). The
+    menu-photo and contact rows stay from spec 3.0A."""
+    session, ui, lines = _ensure_session(db, link)
+    ui.update(screen="cats", await_qty=False, await_menu_image=False)
+    _save(db, session, ui)
+    rows = _cats_rows(db, link, lines)
+    if not any(data == callbacks.build("cart") for row in rows for _, data in row):
+        rows.append([("🛒 السلة", callbacks.build("cart"))])
+    rows.append([("🔍 بحث", callbacks.build("srch"))])
+    rows.append([("📋 عرض المنيو", callbacks.build("showmenu")),
+                 ("📞 تواصل معنا", callbacks.build("contact"))])
+    return MSG_WELCOME, rows
 
 
 def welcome(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, str]]]]:
