@@ -451,6 +451,22 @@ def _create_order(db: Session, link: TelegramLink, cat: Catalog, lines: list[dic
         "source_text": "محادثة تيليجرام (وكيل المحادثة)", "notes": notes})
     total = Decimal("0")
     unresolved = 0
+    # order_lines is unique on (order_id, variant_id): the same variant added twice
+    # from buttons (cart lines are kept separate for display) becomes one line with
+    # the summed quantity. A duplicate insert used to roll the whole confirm back.
+    merged: list[dict] = []
+    seen: dict[str, dict] = {}
+    for ln in lines:
+        key = ln.get("variant_id") if ln.get("status") == "ok" else None
+        if key and key in seen:
+            seen[key]["qty"] = float(Decimal(str(seen[key]["qty"]))
+                                     + Decimal(str(ln["qty"])))
+            continue
+        ln = dict(ln)
+        if key:
+            seen[key] = ln
+        merged.append(ln)
+    lines = merged
     for ln in lines:
         if ln["status"] == "ok":
             v = cat.variant(ln["item_id"], ln["variant_id"])

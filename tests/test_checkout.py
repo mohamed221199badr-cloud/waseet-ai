@@ -272,3 +272,23 @@ def test_bare_number_without_numpad_hints_pick_item(db_session, linked, menu):  
     _fill_cart(db_session, menu)
     rep = _say(db_session, "12")[0]
     assert "اختار الصنف الأول" in rep.text
+
+
+def test_confirm_with_same_variant_added_twice_creates_one_summed_line(
+        db_session, linked, menu):  # noqa: F811
+    """Prod bug 2026-11-26: the cart kept separate lines for one variant,
+    order_lines is unique on (order, variant), the insert failed and confirm did
+    nothing. Duplicate variants now merge into one line with the summed quantity."""
+    from app.models_orders import OrderLine
+    _fill_cart(db_session, menu)                      # 1 kg مفروم احمر
+    tap(db_session, cb_codec.build("cadd"))
+    tap(db_session, cb_codec.build("cat", "اللحوم", "p0"))
+    tap(db_session, cb_codec.build("it", menu["meat"].id))
+    tap(db_session, cb_codec.build("npd", 2))
+    tap(db_session, cb_codec.build("npc"))            # same variant again, 2 kg
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    rep = tap(db_session, cb_codec.build("ckok"))
+    assert "اتبعت للكاشير" in rep.text
+    rows = db_session.scalars(select(OrderLine)).all()
+    assert len(rows) == 1 and rows[0].quantity == 3
