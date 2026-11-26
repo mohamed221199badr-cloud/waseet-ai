@@ -33,7 +33,7 @@ from app.chat.menu_catalog import (
 from app.matching.normalize import normalize_digits
 from app.models import Business
 from app.models_menu import MenuCategory
-from app.models_orders import ChatSession, TelegramLink
+from app.models_orders import ChatSession, Customer, TelegramLink
 
 PAGE_SIZE = 6
 
@@ -586,6 +586,17 @@ MSG_CONTACT = (f"📞 تواصل معنا:\n"
                f"واتساب: {SHOP_WHATSAPP}")
 
 
+def _greeting(db: Session, link: TelegramLink) -> str:
+    """Welcome text, addressed by name when the bot has one (Telegram first name or
+    username saved at link time). The «عميل <chat id>» placeholder is not a name."""
+    customer = db.get(Customer, link.customer_id)
+    name = (customer.name or "").strip() if customer is not None else ""
+    if not name or re.fullmatch(r"عميل\s*-?\d+", name):
+        return MSG_WELCOME
+    return MSG_WELCOME.replace("أهلاً وسهلاً بيك ❤️",
+                               f"أهلاً وسهلاً بيك يا أستاذ / {name} ❤️", 1)
+
+
 def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str, str]]]]:
     """The /start entry point: welcome text with the main menu directly - categories,
     global search and the cart (checkout spec 2026-11-26: no onboarding gate). The
@@ -608,7 +619,7 @@ def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str
     if link.is_owner and not (business and business.menu_photo_file_id):
         # owner-only path to set the welcome photo (customers never see it)
         rows.append([("🖼 رفع صورة المنيو", callbacks.build("showmenu"))])
-    return MSG_WELCOME, rows
+    return _greeting(db, link), rows
 
 
 def main_menu_photo(db: Session, link: TelegramLink) -> str | None:
@@ -641,7 +652,7 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         if cb.action in ("contact", "addr"):
             _save(db, session, ui)
             msg = MSG_CONTACT if cb.action == "contact" else MSG_ADDRESS
-            return msg, [[("🔙 رجوع", callbacks.build("cats"))]], None
+            return msg, [[("🔙 رجوع", callbacks.build("home"))]], None
         business = db.get(Business, link.business_id)
         file_id = business.menu_photo_file_id if business is not None else None
         if file_id:
@@ -657,6 +668,10 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         ui["await_menu_image"] = True
         _save(db, session, ui)
         return MSG_ASK_MENU_IMAGE, [], None
+    if cb.action == "home":
+        # back from العنوان / تواصل معنا: the welcome screen, not the meat menu
+        text, rows = main_menu(db, link)
+        return text, rows, None
     if cb.action == "done":
         # post-order "finish" button: a friendly close, keeps the new-order option
         return MSG_FINISHED, [[("🛒 طلب جديد", callbacks.build("cats"))]], None

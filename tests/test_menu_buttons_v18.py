@@ -374,3 +374,34 @@ def test_welcome_has_meat_button_and_hides_pastry_until_it_exists(db_session, li
     assert not any(lbl.endswith("مصنعات وقطعيات") for lbl in labels)  # moved behind the button
     rep = tap(db_session, cb_codec.build("cats"))
     assert any("اللحوم" in lbl for lbl in _flat(rep.button_rows))
+
+
+def test_back_from_address_and_contact_returns_to_welcome(db_session, linked, menu):  # noqa: F811
+    for action in ("addr", "contact"):
+        shown = tap(db_session, cb_codec.build(action))
+        back = [d for lbl, d in (b for row in shown.button_rows for b in row)
+                if "رجوع" in lbl][0]
+        rep = tap(db_session, back)
+        assert "أهلاً وسهلاً" in rep.text and rep.photo_file_id is None
+        assert "🥩 منيو اللحوم" in _flat(rep.button_rows)
+
+
+def test_welcome_greets_by_name_with_placeholder_fallback(db_session, linked, menu):  # noqa: F811
+    from app.models_orders import Customer
+    link = db_session.scalar(select(svc.TelegramLink).where(svc.TelegramLink.chat_id == CHAT))
+    cust = db_session.get(Customer, link.customer_id)
+    cust.name = "محمد"
+    db_session.commit()
+    rep = svc.handle_update(db_session, _start_upd())[0]
+    assert rep.text.startswith("أهلاً وسهلاً بيك يا أستاذ / محمد")
+    cust.name = f"عميل {CHAT}"
+    db_session.commit()
+    rep = svc.handle_update(db_session, _start_upd())[0]
+    assert rep.text.startswith("أهلاً وسهلاً بيك ❤️") and "أستاذ" not in rep.text
+
+
+def _start_upd():
+    return {"update_id": next(_ids),
+            "message": {"message_id": 1, "text": "/start",
+                        "chat": {"id": CHAT, "type": "private"},
+                        "from": {"id": CHAT, "is_bot": False}}}

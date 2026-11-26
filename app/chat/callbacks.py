@@ -85,7 +85,7 @@ _ARITY = {
     "cats": 0, "cat": 2, "sc": 2, "it": 1, "var": 1,
     "npd": 1, "npdot": 0, "npb": 0, "npc": 0, "dv": 1,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
-    "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0, "addr": 0, "done": 0,
+    "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0, "addr": 0, "home": 0, "done": 0,
     "srch": 0, "ckdel": 1, "ckaddr": 1, "ckok": 0, "ckno": 0,
 }
 
