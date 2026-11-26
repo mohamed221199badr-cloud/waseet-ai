@@ -22,7 +22,7 @@ def staff_page() -> None:
     with st.form("add_staff"):
         st.subheader("موظف جديد")
         full_name = st.text_input("الاسم")
-        email = st.text_input("الإيميل")
+        email = st.text_input("اسم المستخدم (للدخول)")
         role = st.selectbox("الدور", list(ROLE_AR), format_func=ROLE_AR.get)
         password = st.text_input("باسورد مؤقت (هيغيّره عند أول دخول)", type="password")
         if st.form_submit_button("إضافة"):

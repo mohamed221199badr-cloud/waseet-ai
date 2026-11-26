@@ -38,6 +38,9 @@ def _detail(resp: httpx.Response) -> str:
     return str(d or f"HTTP {resp.status_code}")
 
 
+BOARD_API = True  # marker: common.py reloads a stale pre-deploy copy without it
+
+
 class ApiClient:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  http: httpx.Client | None = None):

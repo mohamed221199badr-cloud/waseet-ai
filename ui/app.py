@@ -3,6 +3,7 @@
 The screen holds no business logic: prices, roles and approval rules live in the API.
 The LLM is not involved anywhere here."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -46,16 +47,18 @@ ROLE_PAGES = {
     "kitchen": ["المطبخ"],
 }
 
+# One restaurant per deployment: the company id is not typed at login any more.
+DEFAULT_BUSINESS_SLUG = os.environ.get("WASEET_BUSINESS_SLUG", "beit-el-lahma")
+
 
 def login_form() -> None:
     st.title("وسيط AI: تسجيل الدخول")
     with st.form("login"):
-        slug = st.text_input("معرّف الشركة (slug)")
-        email = st.text_input("الإيميل")
+        username = st.text_input("اسم المستخدم")
         password = st.text_input("كلمة السر", type="password")
         if st.form_submit_button("دخول"):
             try:
-                client().login(slug.strip(), email.strip(), password)
+                client().login(DEFAULT_BUSINESS_SLUG, username.strip(), password)
                 st.session_state.me = client().me()
                 st.rerun()
             except api_client.ApiError as exc:

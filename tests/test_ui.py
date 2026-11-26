@@ -30,13 +30,13 @@ def _order(db, menu):  # noqa: F811
 
 def patch_client(monkeypatch, client):
     real = api_client.ApiClient
+    monkeypatch.setenv("WASEET_BUSINESS_SLUG", "test-biz-a")
     monkeypatch.setattr(api_client, "ApiClient", lambda: real(BASE, http=client))
 
 
 def login(at, email="a@test.local"):
-    at.text_input[0].set_value("test-biz-a")
-    at.text_input[1].set_value(email)
-    at.text_input[2].set_value(TEST_PASSWORD)
+    at.text_input[0].set_value(email)
+    at.text_input[1].set_value(TEST_PASSWORD)
     at.button[0].click()
     return at.run()
 
