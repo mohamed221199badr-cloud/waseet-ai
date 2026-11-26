@@ -13,9 +13,9 @@ import time
 
 import httpx
 
+from app.chat import menu_buttons
 from app.config import settings
 from app.db import SessionLocal
-from app.chat import menu_buttons
 from app.telegram.service import handle_update
 
 log = logging.getLogger("waseet.telegram")
@@ -66,13 +66,17 @@ class TelegramClient:
 
     def send_message(self, chat_id: int, text: str,
                      buttons: list[tuple[str, str]] | None = None,
-                     button_rows: list[list[tuple[str, str]]] | None = None) -> int:
-        """Sends and returns the new message_id (stored to edit the message later)."""
+                     button_rows: list[list[tuple[str, str]]] | None = None) -> int | None:
+        """Sends and returns the new message_id (stored to edit the message later),
+        or None when the API reply carried no message object."""
         params: dict = {"chat_id": chat_id, "text": text}
         markup = self._markup(buttons, button_rows)
         if markup:
             params["reply_markup"] = markup
-        return self._call("sendMessage", **params)["result"]["message_id"]
+        result = self._call("sendMessage", **params)["result"]
+        # mocks and odd API replies may not carry a message object; the caller only
+        # stores the id for later edits and works fine without it
+        return result["message_id"] if isinstance(result, dict) else None
 
     def edit_message(self, chat_id: int, message_id: int, text: str,
                      buttons: list[tuple[str, str]] | None = None,

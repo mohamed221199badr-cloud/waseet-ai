@@ -13,7 +13,6 @@ Session ui state (inside ChatSession.draft["ui"]):
     msg_id: the bot's last menu message, for edit-in-place navigation
 """
 
-import uuid
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -80,9 +79,12 @@ def _save(db: Session, session: ChatSession, ui: dict) -> None:
 def _ensure_session(db: Session, link: TelegramLink) -> tuple[ChatSession, dict, list]:
     session = _session(db, link)
     if session is None:
-        # no conversation yet: open one like the text flow would (browsing, empty cart)
-        menu_agent.handle_message(db, link, "الأصناف")
-        session = _session(db, link)
+        # first contact is a button tap: open the same draft shape the text flow uses
+        session = ChatSession(business_id=link.business_id, customer_id=link.customer_id,
+                              chat_id=link.chat_id, state="collecting",
+                              draft={"kind": "menu", "lines": []})
+        db.add(session)
+        db.flush()
     draft = dict(session.draft or {"kind": "menu", "lines": []})
     draft.setdefault("kind", "menu")
     lines = draft.setdefault("lines", [])
@@ -130,7 +132,7 @@ def _items_rows(cat, category: str, page: int) -> tuple[list[list[tuple[str, str
 def _variants_rows(cat, item_id: str, category: str, page: int) -> list[list[tuple[str, str]]]:
     rows = []
     for v in cat.variants.get(item_id, []):
-        price = "بسعر الكاشير" if v.price is None else f"{v.price.normalize()}ج"
+        price = "بسعر الكاشير" if v.price is None else f"{menu_agent._money(v.price)}ج"
         rows.append([(f"{v.name} - {price}",
                       callbacks.build("var", v.id))])
     rows.append([("🔙 رجوع", callbacks.build("cat", category, f"p{page}"))])
@@ -170,8 +172,9 @@ def _cart_text(db: Session, link: TelegramLink, cat, lines: list[dict]) -> str:
             parts.append(f"- {item.name} ({variant.name}) × {qty_txt}")
         else:
             total += price * qty
-            parts.append(f"- {item.name} ({variant.name}) × {qty_txt} = {price * qty}ج")
-    tail = f"الإجمالي: {total.normalize()}ج"
+            parts.append(
+                f"- {item.name} ({variant.name}) × {qty_txt} = {menu_agent._money(price * qty)}ج")
+    tail = f"الإجمالي: {menu_agent._money(total)}ج"
     if unknown:
         tail += " (في أصناف سعرها عند الكاشير)"
     return "السلة:\n" + "\n".join(parts) + f"\n{tail}"
@@ -334,8 +337,8 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         # order): draft lines are already in the shared shape.
         session.state = "confirming"
         _save(db, session, ui)
-        reply = menu_agent.handle_message(db, link, "تمام")
-        return reply.text, [[("🛒 طلب جديد", callbacks.build("cats"))]]
+        text = menu_agent.handle_message(db, link, "تمام")
+        return text, [[("🛒 طلب جديد", callbacks.build("cats"))]]
 
     if cb.action == "ccancel":
         reply = menu_agent.handle_message(db, link, "الغي")

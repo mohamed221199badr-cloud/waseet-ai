@@ -297,14 +297,13 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
                     rep.button_rows = rows
                 return [rep]
             reply = chat_agent.handle_message(db, link, text)
-            rep = Reply(chat_id, reply,
-                        buttons=chat_agent.buttons_after(db, link, reply))
-            if rep.buttons is None:
-                # menu mode texts (greeting, help, "الأصناف", typed orders) always
-                # carry the category keyboard so the button flow is one tap away
-                rows = menu_buttons.entry_rows(db, link)
-                if rows:
-                    rep.button_rows = rows
+            rep = Reply(chat_id, reply)
+            # menu mode texts (greeting, help, "الأصناف", typed orders) always carry
+            # the v1.8 category keyboard so the button flow is one tap away; the
+            # legacy flat buttons belong to the products path only
+            rows = menu_buttons.entry_rows(db, link)
+            if rows:
+                rep.button_rows = rows
             db.commit()
             return [rep]
         reply = chat_agent.handle_message(db, link, text)
