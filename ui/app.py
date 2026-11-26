@@ -12,6 +12,7 @@ import streamlit as st  # noqa: E402
 
 from ui import (  # noqa: E402
     accounts_page,
+    alert,
     api_client,
     bot_page,
     customers_page,
@@ -79,6 +80,8 @@ def main() -> None:
         st.rerun()
     if page is None:
         return
+    if page != "الطلبات":
+        alert.silence()
     try:
         PAGES[page]()
     except api_client.ApiError as exc:

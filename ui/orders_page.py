@@ -3,7 +3,7 @@
 
 import streamlit as st
 
-from ui import api_client
+from ui import alert, api_client
 from ui.common import METHOD_AR, STATUS_AR, client, day_picker, money, qty_text, show_error
 
 
@@ -26,8 +26,14 @@ def lines_table(o) -> None:
 
 
 def orders_page() -> None:
-    api = client()
     st.title("الطلبات")
+    _live_orders()
+
+
+@st.fragment(run_every=alert.REFRESH_SECONDS)
+def _live_orders() -> None:
+    """Auto-refreshes every few seconds so a new order shows up (and rings) on its own."""
+    api = client()
     c1, c2 = st.columns([3, 2])
     with c1:
         day = day_picker("orders-day")
@@ -37,6 +43,12 @@ def orders_page() -> None:
     st.button("🔄 تحديث")
     orders = api.board_orders(day, code)
     pending = [o for o in orders if o["status"] == "pending"]
+    # The alert follows all pending orders (fresh ones) whatever filter is on screen.
+    todays = api.board_orders("all", "pending")
+    new = alert.fresh_pending(todays)
+    alert.render(len(new))
+    if new:
+        st.error(f"🔔 طلب جديد مستني: {len(new)}")
     if pending:
         st.warning(f"في {len(pending)} طلب مستني الكاشير (فيه صنف سعره عند الكاشير).")
     st.caption(f"{len(orders)} طلب")

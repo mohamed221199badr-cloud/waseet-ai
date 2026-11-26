@@ -7,7 +7,7 @@ import streamlit as st
 from ui import api_client
 
 # Streamlit Cloud can keep a pre-deploy copy of this module in memory.
-if not hasattr(api_client.ApiClient, "board_orders"):  # pragma: no cover
+if not hasattr(api_client, "BOARD_API"):  # pragma: no cover
     importlib.reload(api_client)
 
 STATUS_AR = {"pending": "⏳ في انتظار الكاشير", "confirmed": "✅ متأكد", "rejected": "❌ مرفوض"}
