@@ -61,6 +61,7 @@ class Reply:
     # onboarding (spec 19758722 F2): native reply keyboard (contact share) / remove it
     reply_keyboard: list[list[dict]] | None = None
     remove_keyboard: bool = False
+    whatsapp_to: str | None = None                 # send `text` to this WhatsApp number instead
 
 
 
@@ -244,9 +245,12 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     A confirmed order also queues a message to the owner/cashier chats (checkout
     _finalize puts it in db.info); it is sent after the customer's own reply."""
     db.info.pop("order_notify", None)
+    db.info.pop("order_notify_wa", None)
     replies = _handle_update(db, update)
     for chat_id, text in db.info.pop("order_notify", []):
         replies.append(Reply(chat_id, text))
+    for number, text in db.info.pop("order_notify_wa", []):
+        replies.append(Reply(0, text, whatsapp_to=number))
     return replies
 
 

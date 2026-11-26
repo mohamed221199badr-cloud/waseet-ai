@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # WhatsApp sending needs a Cloud API sender (not built yet); the list is read here.
     cashier_telegram_chat_ids: str = ""
     cashier_whatsapp_numbers: str = ""
+    callmebot_apikey: str = ""  # CALLMEBOT_APIKEY, secret: Railway env only
 
     @property
     def cashier_telegram_chats(self) -> list[int]:

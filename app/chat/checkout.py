@@ -269,6 +269,8 @@ def _queue_cashier_notice(db: Session, link: TelegramLink, customer, order,
     chat_ids = list(dict.fromkeys(
         [o.chat_id for o in owners] + settings.cashier_telegram_chats))
     db.info.setdefault("order_notify", []).extend((cid, text) for cid in chat_ids)
+    db.info.setdefault("order_notify_wa", []).extend(
+        (num, text) for num in settings.cashier_whatsapp_list)
 
 
 def _finalize(db: Session, link: TelegramLink, session, ui: dict,

@@ -16,6 +16,7 @@ import httpx
 from app.chat import menu_buttons
 from app.config import settings
 from app.db import SessionLocal
+from app.notify import whatsapp
 from app.telegram.service import handle_update
 
 log = logging.getLogger("waseet.telegram")
@@ -156,6 +157,9 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
         finally:
             db.close()
         for rep in replies:
+            if rep.whatsapp_to:
+                whatsapp.send(rep.whatsapp_to, rep.text)  # logs and swallows failures
+                continue
             try:
                 if rep.answer_callback_id is not None:
                     client.answer_callback_query(rep.answer_callback_id)
