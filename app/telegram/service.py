@@ -100,6 +100,35 @@ def _menu_business(db: Session):
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _full_name(sender: dict) -> str:
+    """Telegram first_name + last_name when present, else first_name, else ''."""
+    first = (sender.get("first_name") or "").strip()
+    last = (sender.get("last_name") or "").strip()
+    return f"{first} {last}".strip() if first else ""
+
+
+def _sync_name(db: Session, update: dict) -> None:
+    """Greeting uses the customer's full name. Customers auto-linked earlier were saved
+    with the first name only (or the username): upgrade that auto-derived name to the full
+    Telegram name. A name that differs from what Telegram gave us (e.g. one the owner
+    edited) is never touched."""
+    src = update.get("callback_query") or update.get("message") or {}
+    sender = src.get("from") if isinstance(src, dict) else None
+    chat = (src.get("message") or src).get("chat") if isinstance(src, dict) else None
+    if not isinstance(sender, dict) or not isinstance(chat, dict) or sender.get("is_bot"):
+        return
+    full, first = _full_name(sender), (sender.get("first_name") or "").strip()
+    chat_id = chat.get("id")
+    if not full or not isinstance(chat_id, int):
+        return
+    customer = db.scalar(select(Customer).join(
+        TelegramLink, TelegramLink.customer_id == Customer.id).where(
+        TelegramLink.chat_id == chat_id))
+    if customer is not None and customer.name != full and customer.name in (
+            first, (sender.get("username") or "").strip()):
+        customer.name = full[:200]
+
+
 def _auto_link(db: Session, chat_id: int, sender: dict) -> TelegramLink | None:
     """Find-or-create the customer for an unlinked chat on the single menu business,
     and link it. A deactivated customer is never re-activated (the owner's kill
@@ -110,8 +139,7 @@ def _auto_link(db: Session, chat_id: int, sender: dict) -> TelegramLink | None:
     customer = db.scalar(select(Customer).where(
         Customer.business_id == business.id, Customer.telegram_chat_id == chat_id))
     if customer is None:
-        name = (sender.get("first_name") or sender.get("username")
-                or f"عميل {chat_id}")
+        name = _full_name(sender) or sender.get("username") or f"عميل {chat_id}"
         customer = Customer(business_id=business.id, name=str(name)[:200],
                             telegram_chat_id=chat_id)
         db.add(customer)
@@ -259,6 +287,10 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     A confirmed order also queues a message to the owner/cashier chats (checkout
     _finalize puts it in db.info); it is sent after the customer's own reply."""
     db.info.pop("order_notify", None)
+    try:
+        _sync_name(db, update)
+    except Exception:  # a name refresh must never block handling the update
+        db.rollback()
     replies = _handle_update(db, update)
     for item in db.info.pop("order_notify", []):
         chat_id, text = item[0], item[1]

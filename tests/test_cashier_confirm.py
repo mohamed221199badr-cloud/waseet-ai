@@ -39,7 +39,7 @@ def _owner(db, biz):
 
 def _place(db, menu):  # noqa: F811
     _fill_cart(db, menu)
-    tap(db, cb_codec.build("cok"))
+    tap(db, cb_codec.build("ckgo"))
     tap(db, cb_codec.build("ckdel", "pickup"))
     out = svc.handle_update(db, _cb(CHAT, cb_codec.build("ckok")))
     notice = next(r for r in out if r.chat_id == OWNER)
@@ -125,7 +125,7 @@ def test_env_cashier_chat_without_link_can_confirm_and_env_lists_route(  # noqa:
     monkeypatch.setattr(settings, "kitchen_telegram_chat_ids", "888002")
     monkeypatch.setattr(settings, "accounts_telegram_chat_ids", "888003")
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
     order = db_session.scalar(select(Order))
@@ -194,7 +194,7 @@ def test_auto_confirm_sends_everything_at_once(db_session, linked, menu, monkeyp
     monkeypatch.setattr(settings, "order_auto_confirm", True)
     _owner(db_session, linked["ids"]["a"])
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
     order = db_session.scalar(select(Order))

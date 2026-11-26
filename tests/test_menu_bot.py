@@ -135,7 +135,7 @@ def test_single_variant_order_flow(db_session, linked, menu):  # noqa: F811
 def test_multi_variant_asks_then_priced_from_db(db_session, linked, menu):  # noqa: F811
     out = svc.handle_update(db_session, upd(500, "برجر بلدي"))
     assert "برجر بلدي" in out[0].text
-    assert "سعر 1 - 280.00ج" in out[0].text and "سعر 3 - 450.00ج" in out[0].text
+    assert "1) 280ج" in out[0].text and "3) 450ج" in out[0].text  # price, not «سعر N»
     out = svc.handle_update(db_session, upd(500, "2"))          # pick سعر 2
     assert "كام «برجر بلدي (سعر 2)»" in out[0].text
     out = svc.handle_update(db_session, upd(500, "3"))

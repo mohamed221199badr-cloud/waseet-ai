@@ -78,7 +78,7 @@ def test_start_has_no_gate_for_new_customer(db_session, linked_new, menu):  # no
 def test_checkout_collects_phone_delivery_address(db_session, linked_new, menu):  # noqa: F811
     _fill_cart(db_session, menu)
     # phone missing: a fresh message with the native contact keyboard, not an edit
-    rep = tap(db_session, cb_codec.build("cok"))
+    rep = tap(db_session, cb_codec.build("ckgo"))
     assert "محتاجين رقمك" in rep.text
     assert rep.reply_keyboard[0][0]["request_contact"] is True
     assert rep.edit_message_id is None
@@ -109,7 +109,7 @@ def test_checkout_collects_phone_delivery_address(db_session, linked_new, menu):
 
 def test_pickup_skips_phone_and_address(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    rep = tap(db_session, cb_codec.build("cok"))
+    rep = tap(db_session, cb_codec.build("ckgo"))
     assert "دليفري ولا استلام" in rep.text          # phone on file: skipped
     rep = tap(db_session, cb_codec.build("ckdel", "pickup"))
     assert "مراجعة الطلب النهائي" in rep.text
@@ -127,7 +127,7 @@ def test_saved_address_reuse_and_change(db_session, linked, menu):  # noqa: F811
     cust.address = "عنوان قديم، الدقي"
     db_session.commit()
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = tap(db_session, cb_codec.build("ckdel", "delivery"))
     assert "هتستلم على العنوان السابق؟" in rep.text and "عنوان قديم" in rep.text
     # keep: summary carries the saved address, CRM untouched
@@ -142,7 +142,7 @@ def test_saved_address_change_updates_crm(db_session, linked, menu):  # noqa: F8
     cust.address = "عنوان قديم، الدقي"
     db_session.commit()
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "delivery"))
     rep = tap(db_session, cb_codec.build("ckaddr", "change"))
     assert "اكتب العنوان" in rep.text
@@ -154,7 +154,7 @@ def test_saved_address_change_updates_crm(db_session, linked, menu):  # noqa: F8
 
 def test_typed_delivery_answers_work_without_buttons(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = _say(db_session, "من المحل")[0]
     assert "مراجعة الطلب النهائي" in rep.text and "استلام من المحل" in rep.text
     tap(db_session, cb_codec.build("ckok"))
@@ -164,7 +164,7 @@ def test_typed_delivery_answers_work_without_buttons(db_session, linked, menu): 
 
 def test_typed_delivery_then_address(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = _say(db_session, "توصيل")[0]
     assert "اكتب العنوان" in rep.text
     rep = _say(db_session, "شارع 9، المعادي")[0]
@@ -173,28 +173,28 @@ def test_typed_delivery_then_address(db_session, linked, menu):  # noqa: F811
 
 def test_unrelated_text_reshows_step(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = _say(db_session, "اهلا")[0]
     assert "دليفري ولا استلام" in rep.text
 
 
 def test_cancel_keeps_the_cart(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = tap(db_session, cb_codec.build("ckno"))
     assert "مفروم احمر" in rep.text and "✅ تأكيد الطلب" in _flat(rep.button_rows)
     # typed cancel during checkout also keeps the cart
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = _say(db_session, "الغي")[0]
     assert "مفروم احمر" in rep.text
     # and checkout restarts cleanly afterwards
-    rep = tap(db_session, cb_codec.build("cok"))
+    rep = tap(db_session, cb_codec.build("ckgo"))
     assert "دليفري ولا استلام" in rep.text
 
 
 def test_contact_ownership_and_bad_phone_rejected(db_session, linked_new, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     rep = _contact(db_session, user_id=CHAT + 1)[0]
     assert "مش رقم حد تاني" in rep.text
     assert _customer(db_session, linked_new).phone is None
@@ -205,7 +205,7 @@ def test_contact_ownership_and_bad_phone_rejected(db_session, linked_new, menu):
 
 def test_short_address_rejected(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "delivery"))
     rep = _say(db_session, "abc")[0]
     assert "قصير" in rep.text
@@ -213,7 +213,7 @@ def test_short_address_rejected(db_session, linked, menu):  # noqa: F811
 
 
 def test_empty_cart_confirm_does_not_start_checkout(db_session, linked, menu):  # noqa: F811
-    rep = tap(db_session, cb_codec.build("cok"))
+    rep = tap(db_session, cb_codec.build("ckgo"))
     assert "فاضية" in rep.text
     assert "دليفري ولا استلام" not in rep.text
 
@@ -286,7 +286,7 @@ def test_confirm_with_same_variant_added_twice_creates_one_summed_line(
     tap(db_session, cb_codec.build("it", menu["meat"].id))
     tap(db_session, cb_codec.build("npd", 2))
     tap(db_session, cb_codec.build("npc"))            # same variant again, 2 kg
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     rep = tap(db_session, cb_codec.build("ckok"))
     assert "اتأكد" in rep.text
@@ -296,7 +296,7 @@ def test_confirm_with_same_variant_added_twice_creates_one_summed_line(
 
 def test_post_order_screen_has_finish_button(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     rep = tap(db_session, cb_codec.build("ckok"))
     labels = _flat(rep.button_rows)
@@ -308,7 +308,7 @@ def test_post_order_screen_has_finish_button(db_session, linked, menu):  # noqa:
 
 def test_typed_finish_word_confirms_only_at_final_step(db_session, linked, menu):  # noqa: F811
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))                 # delivery question open
+    tap(db_session, cb_codec.build("ckgo"))                 # delivery question open
     out = _say(db_session, "تمام")
     assert "دليفري ولا استلام" in out[0].text              # NOT a confirm yet
     assert db_session.scalar(select(Order)) is None
@@ -331,7 +331,7 @@ def test_confirmed_order_notifies_owner_chats(db_session, linked, menu):  # noqa
                                 chat_id=777001, is_owner=True))
     db_session.commit()
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
     notes = [r for r in out if r.chat_id == 777001 and r.text.startswith("🔔")]
@@ -344,9 +344,57 @@ def test_confirmed_order_notifies_owner_chats(db_session, linked, menu):  # noqa
 def test_cashier_chat_ids_from_config_get_the_notice(db_session, linked, menu, monkeypatch):  # noqa: F811
     monkeypatch.setattr(settings, "cashier_telegram_chat_ids", "888001, 888002")
     _fill_cart(db_session, menu)
-    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
     tap(db_session, cb_codec.build("ckdel", "pickup"))
     out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
     assert sorted(r.chat_id for r in out if "طلب جديد" in r.text) == [888001, 888002]
     monkeypatch.setattr(settings, "cashier_whatsapp_numbers", "01096840957, +20 10 1759 7501")
     assert settings.cashier_whatsapp_list == ["01096840957", "201017597501"]
+
+
+def test_cart_has_no_add_button_and_confirm_asks_add_more_first(db_session, linked, menu):  # noqa: F811
+    cart = _fill_cart(db_session, menu)
+    labels = _flat(cart.button_rows)
+    assert not any("أضف صنف" in lbl for lbl in labels)
+    assert "✅ تأكيد الطلب" in labels and "🧹 إفراغ السلة" in labels
+    assert "❌ إلغاء الطلب" in labels and any("🔙" in lbl for lbl in labels)
+    ask = tap(db_session, cb_codec.build("cok"))
+    assert "عايز تضيف حاجة تانية" in ask.text
+    assert db_session.scalar(select(Order)) is None            # nothing created yet
+    assert [lbl for lbl in _flat(ask.button_rows)] == ["➕ أضيف صنف", "✅ كمّل الطلب", "🔙 رجوع"]
+    more = tap(db_session, cb_codec.build("cadd"))             # add one more item
+    assert "اختار من الأصناف" in more.text
+    tap(db_session, cb_codec.build("cart"))
+    tap(db_session, cb_codec.build("cok"))
+    go = tap(db_session, cb_codec.build("ckgo"))               # continue: checkout starts
+    assert "دليفري ولا استلام" in go.text
+
+
+def test_generic_price_variants_show_the_actual_price(db_session, linked, menu):  # noqa: F811
+    from app.chat import cashier_actions
+    from app.chat.menu_agent import is_generic_variant, variant_label
+    from app.models_orders import OrderLine
+    assert is_generic_variant("سعر 1") and is_generic_variant("سعر ٢")
+    assert not is_generic_variant("M") and not is_generic_variant("نص كيلو")
+    assert variant_label("سعر 1", 270) == "270ج" and variant_label("M", 270) == "M"
+    assert variant_label("سعر 1", None) == "سعر 1"
+    tap(db_session, cb_codec.build("cat", "مصنعات", "p0"))
+    pick = tap(db_session, cb_codec.build("it", menu["burger"].id))
+    labels = _flat(pick.button_rows)
+    assert "280ج" in labels and "350ج" in labels and not any("سعر" in lbl for lbl in labels)
+    tap(db_session, cb_codec.build("var", menu["burger_v"][0].id))
+    tap(db_session, cb_codec.build("npd", 2))
+    cart = tap(db_session, cb_codec.build("npc"))
+    assert "(280ج) × 2 = 560.00ج" in cart.text and "سعر 1" not in cart.text
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckgo"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
+    notice = [r for r in out if r.text.startswith("🔔")]
+    assert notice == [] or "سعر 1" not in notice[0].text  # no owner chat in this fixture
+    order = db_session.scalar(select(Order))
+    lines = list(db_session.scalars(select(OrderLine).where(OrderLine.order_id == order.id)))
+    assert lines[0].variant_name == "سعر 1"               # DB name untouched
+    acc = cashier_actions.accounts_text(order, lines, None, "x")
+    assert "سعر 1" not in acc and "× 280.00" in acc
+    assert "(سعر 1)" in cashier_actions.kitchen_text(order, lines)  # kitchen: no prices

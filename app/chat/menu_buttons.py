@@ -164,8 +164,10 @@ def _variants_rows(cat, item_id: str, category: str, page: int) -> list[list[tup
     rows = []
     for v in cat.variants.get(item_id, []):
         price = "بسعر الكاشير" if v.price is None else f"{menu_agent._money(v.price)}ج"
-        rows.append([(f"{v.name} - {price}",
-                      callbacks.build("var", v.id))])
+        label = (menu_agent.variant_label(v.name, v.price)
+                 if v.price is not None and menu_agent.is_generic_variant(v.name)
+                 else f"{v.name} - {price}")
+        rows.append([(label, callbacks.build("var", v.id))])
     rows.append([("🔙 رجوع", callbacks.build("cat", category, f"p{page}"))])
     return rows
 
@@ -239,11 +241,12 @@ def _cart_text(db: Session, link: TelegramLink, cat, lines: list[dict]) -> str:
                                             variant)
         if price is None:
             unknown = True
-            parts.append(f"- {item.name} ({variant.name}) × {qty_txt}")
+            parts.append(f"- {item.name} ({variant.name}) × {qty_txt}")  # no price to show
         else:
             total += price * qty
             parts.append(
-                f"- {item.name} ({variant.name}) × {qty_txt} = {menu_agent._money(price * qty)}ج")
+                f"- {item.name} ({menu_agent.variant_label(variant.name, price)}) × {qty_txt}"
+                f" = {menu_agent._money(price * qty)}ج")
     tail = f"الإجمالي: {menu_agent._money(total)}ج"
     if unknown:
         tail += " (في أصناف سعرها عند الكاشير)"
@@ -253,7 +256,6 @@ def _cart_text(db: Session, link: TelegramLink, cat, lines: list[dict]) -> str:
 def _cart_rows() -> list[list[tuple[str, str]]]:
     return [
         [("✅ تأكيد الطلب", callbacks.build("cok"))],
-        [("➕ أضف صنف", callbacks.build("cadd"))],
         [("🧹 إفراغ السلة", callbacks.build("cclr"))],
         [("❌ إلغاء الطلب", callbacks.build("ccancel"))],
         [("🔙 رجوع", callbacks.build("cats"))],

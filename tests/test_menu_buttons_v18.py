@@ -135,7 +135,7 @@ def test_full_button_flow_to_draft_order(db_session, linked, menu):  # noqa: F81
     assert "✅ تأكيد الطلب" in _flat(rep.button_rows)
     # step 4: confirm starts checkout (phone is on file -> delivery type first);
     # pickup skips the address, final confirm sends the order to the cashier
-    rep = tap(db_session, cb_codec.build("cok"))
+    rep = tap(db_session, cb_codec.build("ckgo"))
     assert "دليفري ولا استلام" in rep.text and rep.edit_message_id == 42
     assert db_session.scalar(select(Order)) is None
     rep = tap(db_session, cb_codec.build("ckdel", "pickup"))
@@ -151,8 +151,8 @@ def test_multi_variant_item_shows_variant_buttons(db_session, linked, menu):  # 
     rep = tap(db_session, cb_codec.build("cat", "مصنعات", "p0"))
     rep = tap(db_session, cb_codec.build("it", menu["burger"].id))
     labels = _flat(rep.button_rows)
-    assert any("سعر 1" in lbl and "280" in lbl for lbl in labels)
-    assert any("سعر 2" in lbl and "350" in lbl for lbl in labels)
+    assert "280ج" in labels and "350ج" in labels  # generic «سعر N» shows its price
+    assert not any("سعر" in lbl for lbl in labels)
     # variant id alone resolves the item (64-byte budget: no item id in the payload)
     rep = tap(db_session, cb_codec.build("var", menu["burger_v"][1].id))
     assert "برجر بلدي" in rep.text

@@ -51,13 +51,15 @@ def menu(db_session, shop):  # noqa: F811
     return shop
 
 
-def _text(chat_id, body, first_name="زبون"):
+def _text(chat_id, body, first_name="زبون", last_name=None):
+    frm = {"id": chat_id, "is_bot": False, "first_name": first_name}
+    if last_name:
+        frm["last_name"] = last_name
     return {
         "update_id": next(_ids),
         "message": {"message_id": 1, "text": body,
                     "chat": {"id": chat_id, "type": "private"},
-                    "from": {"id": chat_id, "is_bot": False,
-                             "first_name": first_name}},
+                    "from": frm},
     }
 
 
@@ -216,3 +218,30 @@ def test_mark_owner_endpoint_owner_only(db_session, client, menu):  # noqa: F811
     r = client.post(f"/api/v1/telegram/links/{link.id}/owner",
                     headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
+
+
+def test_greeting_uses_full_name_first_and_last(db_session, menu):  # noqa: F811
+    rep = svc.handle_update(db_session, _text(910001, "/start", "محمد", "بدر"))[0]
+    assert rep.text.startswith("أهلاً وسهلاً بيك يا أستاذ / محمد بدر ❤️")
+
+
+def test_greeting_first_name_only_when_no_last_name(db_session, menu):  # noqa: F811
+    rep = svc.handle_update(db_session, _text(910002, "/start", "محمد"))[0]
+    assert rep.text.startswith("أهلاً وسهلاً بيك يا أستاذ / محمد ❤️")
+    assert "محمد  " not in rep.text
+
+
+def test_existing_first_name_customer_is_upgraded_to_full_name(db_session, menu):  # noqa: F811
+    svc.handle_update(db_session, _text(910003, "/start", "منى"))          # saved as "منى"
+    rep = svc.handle_update(db_session, _text(910003, "/start", "منى", "السيد"))[0]
+    assert rep.text.startswith("أهلاً وسهلاً بيك يا أستاذ / منى السيد ❤️")
+
+
+def test_owner_edited_name_is_not_overwritten(db_session, menu):  # noqa: F811
+    from app.models_orders import Customer
+    svc.handle_update(db_session, _text(910004, "/start", "منى"))
+    cust = db_session.scalar(select(Customer).where(Customer.telegram_chat_id == 910004))
+    cust.name = "الحاجة منى"
+    db_session.commit()
+    rep = svc.handle_update(db_session, _text(910004, "/start", "منى", "السيد"))[0]
+    assert "الحاجة منى" in rep.text and "منى السيد" not in rep.text
