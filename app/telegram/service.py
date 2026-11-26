@@ -61,6 +61,7 @@ class Reply:
     # onboarding (spec 19758722 F2): native reply keyboard (contact share) / remove it
     reply_keyboard: list[list[dict]] | None = None
     remove_keyboard: bool = False
+    sheet_row: dict | None = None                  # append to the Google Sheet
 
 
 
@@ -287,6 +288,7 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
     A confirmed order also queues a message to the owner/cashier chats (checkout
     _finalize puts it in db.info); it is sent after the customer's own reply."""
     db.info.pop("order_notify", None)
+    db.info.pop("order_sheet", None)
     try:
         _sync_name(db, update)
     except Exception:  # a name refresh must never block handling the update
@@ -298,6 +300,8 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         if len(item) > 2:
             rep.button_rows = item[2]
         replies.append(rep)
+    for row in db.info.pop("order_sheet", []):
+        replies.append(Reply(0, "", sheet_row=row))
     return replies
 
 
