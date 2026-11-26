@@ -41,6 +41,7 @@ from app.models_menu import MenuItem, MenuItemVariant
 from app.models_orders import (
     ChatSession,
     Customer,
+    Order,
     OrderException,
     OrderLine,
     TelegramLink,
@@ -119,9 +120,11 @@ def handle_message(db: Session, link: TelegramLink, text: str) -> str:
         label = ("yes" if legacy._is(text, legacy.YES)
                  else "no" if legacy._is(text, legacy.NO) else None)
         if label == "yes":
-            reply = _create_order(db, link, cat, lines)
-            legacy._clear(db, session)
-            return reply
+            # a typed «تمام» starts the same checkout the cart button does:
+            # phone/delivery/address are collected before the order exists
+            from app.chat import checkout
+            checkout.begin(db, link)
+            return ""  # the caller renders the checkout step
         if label == "no":
             legacy._clear(db, session)
             return legacy.MSG_CANCELLED
@@ -439,12 +442,13 @@ def _confirmation(db: Session, link: TelegramLink, cat: Catalog, lines: list[dic
     return "\n".join(out)
 
 
-def _create_order(db: Session, link: TelegramLink, cat: Catalog, lines: list[dict]) -> str:
+def _create_order(db: Session, link: TelegramLink, cat: Catalog, lines: list[dict],
+                  status: str = "draft", notes: str | None = None) -> Order:
     customer = db.scalar(select(Customer).where(
         Customer.business_id == link.business_id, Customer.id == link.customer_id))
     order = orders_repo.create_order(db, link.business_id, {
         "customer_id": customer.id, "channel": "telegram",
-        "source_text": "محادثة تيليجرام (وكيل المحادثة)", "notes": None})
+        "source_text": "محادثة تيليجرام (وكيل المحادثة)", "notes": notes})
     total = Decimal("0")
     unresolved = 0
     for ln in lines:
@@ -475,11 +479,13 @@ def _create_order(db: Session, link: TelegramLink, cat: Catalog, lines: list[dic
                 quantity=(int(ln["qty"]) if isinstance(ln.get("qty"), int) else None),
                 candidates=[{"menu_item_id": c} for c in cands]))
     order.total = total
+    order.status = status
     db.flush()
     write_audit(db, business_id=link.business_id, entity="order", entity_id=str(order.id),
                 action="create", payload={"source": "menu_chat_agent", "channel": "telegram",
-                                          "lines": len(lines), "exceptions": unresolved})
-    return legacy.MSG_AFTER_CONFIRM.format(oid=str(order.id)[:8])
+                                          "lines": len(lines), "exceptions": unresolved,
+                                          "status": status})
+    return order
 
 
 # ---- smalltalk (menu facts from the DB) ------------------------------------------------------

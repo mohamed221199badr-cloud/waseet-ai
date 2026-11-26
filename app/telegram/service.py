@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.audit import write_audit
 from app.chat import agent as chat_agent
 from app.chat import callbacks as cb_codec
-from app.chat import menu_buttons, menu_catalog, onboarding
+from app.chat import checkout, menu_buttons, menu_catalog
 from app.config import settings
 from app.models_orders import (
     Customer,
@@ -72,28 +72,15 @@ class Reply:
 
 
 
-def _onboarding_reply(db: Session, link: TelegramLink) -> Reply | None:
-    """Mandatory onboarding gate (spec 19758722 F2): the current step as a Reply,
-    or None when the customer's profile is complete. Menu businesses only."""
-    if link is None or not menu_catalog.has_menu(db, link.business_id):
-        return None
-    step = onboarding.current_step(db, link)
-    if step is None:
-        return None
-    rep = Reply(link.chat_id, step["text"], store_msg_id=True,
-                reply_keyboard=step["reply_keyboard"],
-                remove_keyboard=step["remove_keyboard"])
-    if step["rows"]:
-        rep.button_rows = step["rows"]
-    return rep
-
-
-def _step_reply(chat_id: int, step: dict, answer_callback_id: str | None = None) -> Reply:
-    rep = Reply(chat_id, step["text"], answer_callback_id=answer_callback_id,
-                store_msg_id=True, reply_keyboard=step["reply_keyboard"],
-                remove_keyboard=step["remove_keyboard"])
-    if step["rows"]:
-        rep.button_rows = step["rows"]
+def _checkout_reply(chat_id: int, spec: dict,
+                    answer_callback_id: str | None = None) -> Reply:
+    """A checkout step dict as a Reply (checkout spec 2026-11-26)."""
+    rep = Reply(chat_id, spec["text"], answer_callback_id=answer_callback_id,
+                store_msg_id=True, reply_keyboard=spec.get("reply_keyboard"),
+                remove_keyboard=spec.get("remove_keyboard", False),
+                edit_message_id=spec.get("edit_message_id"))
+    if spec.get("rows"):
+        rep.button_rows = spec["rows"]
     return rep
 
 # Pinned callback_data format (slice A, no LLM). Every value matches this whitelist and is
@@ -271,13 +258,8 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
     if link is None and settings.chat_agent_enabled:
         link = _auto_link(db, chat_id, sender)
         if link is not None:
-            # first contact is a tap: onboarding first if the profile is incomplete,
-            # otherwise the welcome screen, fresh message either way
-            gate = _onboarding_reply(db, link)
-            if gate is not None:
-                gate.answer_callback_id = cq.get("id")
-                return chat_id, None, gate
-            text, rows = menu_buttons.welcome(db, link)
+            # first contact is a tap: the main menu, fresh message either way
+            text, rows = menu_buttons.main_menu(db, link)
             rep = Reply(chat_id, text, answer_callback_id=cq.get("id"),
                         store_msg_id=True)
             rep.button_rows = rows
@@ -291,14 +273,13 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
                                         answer_callback_id=cq.get("id"))
         if not menu_catalog.has_menu(db, link.business_id):
             return chat_id, None, Reply(chat_id, "", answer_callback_id=cq.get("id"))
-        if parsed.action == "dv":
-            # onboarding delivery/pickup is the only tap allowed through the gate
-            step = onboarding.handle_delivery_choice(db, link, parsed.args[0])
-            return chat_id, None, _step_reply(chat_id, step, cq.get("id"))
-        step = onboarding.current_step(db, link)
-        if step is not None:
-            # profile incomplete: no menu callback executes (bypass prevention)
-            return chat_id, None, _step_reply(chat_id, step, cq.get("id"))
+        if parsed.action in checkout.CALLBACK_ACTIONS:
+            # checkout taps (cart confirm starts it): checkout renders the step,
+            # editing the tapped message except where a reply keyboard is needed
+            msg_id = msg.get("message_id")
+            spec = checkout.handle_callback(
+                db, link, parsed, msg_id if isinstance(msg_id, int) else None)
+            return chat_id, None, _checkout_reply(chat_id, spec, cq.get("id"))
         msg_id = msg.get("message_id")
         text, rows, photo = menu_buttons.handle_callback(
             db, link, parsed, msg_id if isinstance(msg_id, int) else None)
@@ -362,12 +343,12 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
             or sender.get("is_bot")):
         return []
     if not (isinstance(text, str) and text.strip()):
-        # onboarding: a natively shared contact while the phone step is open
+        # checkout: a natively shared contact while the phone step is open
         contact = msg.get("contact")
         if isinstance(contact, dict) and settings.chat_agent_enabled:
             link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
             if (link is not None and menu_catalog.has_menu(db, link.business_id)
-                    and onboarding.wants_contact(db, link)):
+                    and checkout.awaiting_contact(db, link)):
                 inserted = db.execute(
                     pg_insert(TelegramUpdate).values(update_id=update_id)
                     .on_conflict_do_nothing().returning(TelegramUpdate.update_id)
@@ -375,9 +356,9 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
                 if inserted is None:
                     db.rollback()
                     return []
-                step = onboarding.handle_contact(db, link, contact, sender.get("id"))
+                spec = checkout.handle_contact(db, link, contact, sender.get("id"))
                 db.commit()
-                return [_step_reply(chat_id, step)]
+                return [_checkout_reply(chat_id, spec)]
         # UI v1.8 3.0B: a photo is meaningful only while the customer was asked for
         # a menu image; anything else non-text is ignored (spec: never ask otherwise)
         photos = msg.get("photo")
@@ -429,13 +410,8 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         if arg.strip():
             reply = _redeem(db, chat_id, arg)
         elif link is not None and menu_catalog.has_menu(db, link.business_id):
-            # onboarding before the welcome screen; repeated /start resumes the step
-            gate = _onboarding_reply(db, link)
-            if gate is not None:
-                db.commit()
-                return [gate]
-            # UI v1.8 3.0A: the welcome screen is the menu-mode entry point
-            text_out, rows = menu_buttons.welcome(db, link)
+            # no onboarding gate (checkout spec 2026-11-26): the main menu directly
+            text_out, rows = menu_buttons.main_menu(db, link)
             db.commit()
             rep = Reply(chat_id, text_out, store_msg_id=True)
             rep.button_rows = rows
@@ -460,29 +436,18 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         reply = MSG_HELP
     elif settings.chat_agent_enabled:
         if link is not None and _fresh_auto_link:
-            gate = _onboarding_reply(db, link)
-            if gate is not None:
-                db.commit()
-                return [gate]
-            text_out, rows = menu_buttons.welcome(db, link)
+            text_out, rows = menu_buttons.main_menu(db, link)
             db.commit()
             rep = Reply(chat_id, text_out, store_msg_id=True)
             rep.button_rows = rows
             return [rep]
         if menu_catalog.has_menu(db, link.business_id):
-            if onboarding.current_step(db, link) is not None:
-                if onboarding.wants_address(db, link):
-                    step = onboarding.handle_address_text(db, link, text)
-                else:
-                    # typed answers work too (hotfix 19793273), anything else
-                    # re-shows the current step
-                    method = onboarding.delivery_answer(text)
-                    if method is not None:
-                        step = onboarding.handle_delivery_choice(db, link, method)
-                    else:
-                        step = onboarding.current_step(db, link)
+            if checkout.active(db, link):
+                # checkout open: this text answers the current step (address text,
+                # typed delivery answer, typed cancel); anything else re-shows it
+                spec = checkout.handle_text(db, link, text)
                 db.commit()
-                return [_step_reply(chat_id, step)]
+                return [_checkout_reply(chat_id, spec)]
             if menu_buttons.wants_text(db, link):
                 # UI v1.8 custom-quantity state: this text is a number for the flow
                 out, rows, edit_id = menu_buttons.handle_text(db, link, text)
@@ -491,7 +456,26 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
                 if rows:
                     rep.button_rows = rows
                 return [rep]
+            if menu_buttons.is_bare_number(text):
+                # a typed quantity with no numpad open (bug 19817564): the matcher
+                # would only shrug, so point him back at picking the item first.
+                # A typed-flow quantity question (clarifying/confirming) still owns
+                # its numbers, so the hint fires only with no open order state.
+                sess = chat_agent._load(db, link)
+                if sess is None or sess.state not in ("clarifying", "confirming"):
+                    rep = Reply(chat_id, menu_buttons.MSG_PICK_ITEM_FIRST)
+                    rows = menu_buttons.entry_rows(db, link)
+                    if rows:
+                        rep.button_rows = rows
+                    db.commit()
+                    return [rep]
             reply = chat_agent.handle_message(db, link, text)
+            if checkout.active(db, link):
+                # a typed «تمام» on an open confirmation just started checkout:
+                # render the first step (with its keyboard) instead of plain text
+                spec = checkout.current_spec(db, link)
+                db.commit()
+                return [_checkout_reply(chat_id, spec)]
             rep = Reply(chat_id, reply)
             # menu mode texts (greeting, help, "الأصناف", typed orders) always carry
             # the v1.8 category keyboard so the button flow is one tap away; the
