@@ -358,3 +358,17 @@ def test_contact_button_shows_shop_details(db_session, linked, menu):  # noqa: F
     assert "01017597501" in rep.text and "01040756249" in rep.text
     assert "01553799899" in rep.text
     assert "🔙 رجوع" in _flat(rep.button_rows)
+
+
+def test_welcome_has_meat_button_and_hides_pastry_until_it_exists(db_session, linked, menu):  # noqa: F811
+    out = svc.handle_update(db_session, {
+        "update_id": next(_ids),
+        "message": {"message_id": 1, "text": "/start",
+                    "chat": {"id": CHAT, "type": "private"},
+                    "from": {"id": CHAT, "is_bot": False}}})
+    labels = _flat(out[0].button_rows)
+    assert "🥩 منيو اللحوم" in labels
+    assert not any("الفطائر" in lbl for lbl in labels)
+    assert not any(lbl.endswith("مصنعات وقطعيات") for lbl in labels)  # moved behind the button
+    rep = tap(db_session, cb_codec.build("cats"))
+    assert any("اللحوم" in lbl for lbl in _flat(rep.button_rows))

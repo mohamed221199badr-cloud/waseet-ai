@@ -122,10 +122,13 @@ def _category_emoji(name: str) -> str:
     return next((e for key, e in _CATEGORY_EMOJI.items() if key in name), "🍽")
 
 
+PASTRY_CATEGORY = "الفطائر"  # own welcome button, not part of the meat categories list
+
+
 def _cats_rows(db: Session, link: TelegramLink, lines: list[dict]) -> list[list[tuple[str, str]]]:
     rows = [[(f"{_category_emoji(c.name)} {c.name}",
               callbacks.build("cat", c.name, "p0"))]
-            for c in list_categories(db, link.business_id)]
+            for c in list_categories(db, link.business_id) if c.name != PASTRY_CATEGORY]
     if _ok_lines(lines):
         rows.append([("🛒 السلة", callbacks.build("cart"))])
     return rows
@@ -590,9 +593,12 @@ def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str
     session, ui, lines = _ensure_session(db, link)
     ui.update(screen="cats", await_qty=False, await_menu_image=False)
     _save(db, session, ui)
-    rows = _cats_rows(db, link, lines)
-    if not any(data == callbacks.build("cart") for row in rows for _, data in row):
-        rows.append([("🛒 السلة", callbacks.build("cart"))])
+    # welcome (WhatsApp 9:47): the 6 category buttons move behind «منيو اللحوم»;
+    # «منيو الفطائر» opens that category's photo + items once it exists
+    rows = [[("🥩 منيو اللحوم", callbacks.build("cats"))]]
+    if any(c.name == PASTRY_CATEGORY for c in list_categories(db, link.business_id)):
+        rows.append([("🥟 منيو الفطائر", callbacks.build("cat", PASTRY_CATEGORY, "p0"))])
+    rows.append([("🛒 السلة", callbacks.build("cart"))])
     rows.append([("🔍 بحث", callbacks.build("srch"))])
     # the brochure photo replaces the old «عرض المنيو» button (WhatsApp 9:39);
     # contact is split into two small buttons: address and phones
