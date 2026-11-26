@@ -23,6 +23,22 @@ class Settings(BaseSettings):
     # Milestone 4: set TELEGRAM_BOT_TOKEN in your own environment/.env. Never hardcode or commit it.
     telegram_bot_token: str = ""
     telegram_link_code_ttl_hours: int = 24
+    # Order alerts when a customer confirms (comma-separated, env-configurable so a swap
+    # is a config change): extra Telegram chat ids besides the owner-linked chats, and
+    # the cashier WhatsApp numbers (digits with country code, e.g. 201096840957).
+    # WhatsApp sending needs a Cloud API sender (not built yet); the list is read here.
+    cashier_telegram_chat_ids: str = ""
+    cashier_whatsapp_numbers: str = ""
+
+    @property
+    def cashier_telegram_chats(self) -> list[int]:
+        return [int(x) for x in self.cashier_telegram_chat_ids.replace(" ", "").split(",")
+                if x.lstrip("-").isdigit()]
+
+    @property
+    def cashier_whatsapp_list(self) -> list[str]:
+        return [x for x in "".join(c for c in self.cashier_whatsapp_numbers
+                                   if c.isdigit() or c == ",").split(",") if x]
     # Milestone 5: conversational order agent (rules + DB decide; the LLM is optional).
     chat_agent_enabled: bool = True       # CHAT_AGENT_ENABLED=false -> old one-shot intake
     chat_show_prices: bool = True         # prices in the confirmation message (from DB only)

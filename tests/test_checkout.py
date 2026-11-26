@@ -339,3 +339,14 @@ def test_confirmed_order_notifies_owner_chats(db_session, linked, menu):  # noqa
     assert "طلب جديد" in notes[0].text and "مفروم احمر" in notes[0].text
     assert "استلام" in notes[0].text
     assert "جاري التنفيذ" in out[0].text
+
+
+def test_cashier_chat_ids_from_config_get_the_notice(db_session, linked, menu, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(settings, "cashier_telegram_chat_ids", "888001, 888002")
+    _fill_cart(db_session, menu)
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
+    assert sorted(r.chat_id for r in out if "طلب جديد" in r.text) == [888001, 888002]
+    monkeypatch.setattr(settings, "cashier_whatsapp_numbers", "01096840957, +20 10 1759 7501")
+    assert settings.cashier_whatsapp_list == ["01096840957", "201017597501"]
