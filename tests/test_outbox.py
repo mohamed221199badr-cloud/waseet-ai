@@ -9,8 +9,8 @@ from sqlalchemy import select
 from app.models_orders import NotificationOutbox, OrderStatusHistory
 from app.services import outbox
 from app.services.order_status import transition
-from tests.test_order_flow import world  # noqa: F401
 from tests.test_migrations import _alembic, scratch_url  # noqa: F401
+from tests.test_order_flow import world  # noqa: F401
 
 
 def _rows(db, order, event=None):

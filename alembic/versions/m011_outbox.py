@@ -8,9 +8,10 @@ new row, not a swallowed duplicate. Failures stay visible (status/last_error)
 from Phase 3 onward (C3).
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+
+from alembic import op
 
 revision = "m011_outbox"
 down_revision = "m010_orders"
