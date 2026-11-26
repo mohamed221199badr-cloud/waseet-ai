@@ -20,6 +20,7 @@ OrderExceptions, audit) with status "pending" — main's cashier-visible state.
 and VARCHAR(20) reject it on main. Switch the status argument when that merges.)
 """
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
@@ -243,6 +244,30 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
     return _finalize(db, link, session, ui, lines, edit_id=msg_id)
 
 
+MSG_CASHIER = ("🔔 طلب جديد رقم {oid}\n"
+               "العميل: {name}{phone}\n"
+               "{body}\n"
+               "الطلب: {method}{addr}")
+
+
+def _queue_cashier_notice(db: Session, link: TelegramLink, customer, order,
+                          lines: list[dict], method: str, address: str) -> None:
+    """Immediate message to every owner chat (the shop's cashier/owner links) when an
+    order is confirmed. Sent by the worker after the customer's reply."""
+    cat = menu_buttons.load_catalog(db, link.business_id)
+    cart = menu_buttons._cart_text(db, link, cat, lines)
+    body = cart.split("\n", 1)[1] if cart.startswith("السلة:\n") else cart
+    text = MSG_CASHIER.format(
+        oid=str(order.id)[:8], name=customer.name,
+        phone=f" - {customer.phone}" if customer.phone else "", body=body,
+        method=_METHOD_LABEL[method],
+        addr=f"\nالعنوان: {address}" if method == "delivery" and address else "")
+    owners = db.scalars(select(TelegramLink).where(
+        TelegramLink.business_id == link.business_id,
+        TelegramLink.is_owner.is_(True))).all()
+    db.info.setdefault("order_notify", []).extend((o.chat_id, text) for o in owners)
+
+
 def _finalize(db: Session, link: TelegramLink, session, ui: dict,
               lines: list[dict], edit_id=None) -> dict:
     customer = db.get(Customer, link.customer_id)
@@ -262,6 +287,7 @@ def _finalize(db: Session, link: TelegramLink, session, ui: dict,
                 entity_id=str(order.id), action="checkout",
                 payload={"status": "pending", "delivery_method": method,
                          "has_address": bool(address)})
+    _queue_cashier_notice(db, link, customer, order, lines, method, address)
     legacy._clear(db, session)  # spec: clear the session draft on final confirm
     return _spec(MSG_DONE.format(oid=str(order.id)[:8]),
                  rows=[[("✅ تمام، خلصت", callbacks.build("done"))],

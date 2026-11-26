@@ -10,7 +10,7 @@ from app.config import settings
 from app.models_orders import Customer, Order
 from app.telegram import service as svc
 from tests.test_intake import shop  # noqa: F401
-from tests.test_menu_buttons_v18 import CHAT, _flat, linked, menu, tap  # noqa: F401
+from tests.test_menu_buttons_v18 import CHAT, _cb, _flat, linked, menu, tap  # noqa: F401
 from tests.test_migrations import _alembic, scratch_url  # noqa: F401
 
 _ids_counter = [880000]
@@ -320,3 +320,22 @@ def test_typed_finish_word_confirms_only_at_final_step(db_session, linked, menu)
     again = _say(db_session, "تمام")                       # no second order
     assert len(db_session.scalars(select(Order)).all()) == 1
     assert again is not None
+
+
+def test_confirmed_order_notifies_owner_chats(db_session, linked, menu):  # noqa: F811
+    from app.models_orders import TelegramLink
+    staff = Customer(business_id=linked["ids"]["a"], name="كاشير", telegram_chat_id=777001)
+    db_session.add(staff)
+    db_session.flush()
+    db_session.add(TelegramLink(business_id=linked["ids"]["a"], customer_id=staff.id,
+                                chat_id=777001, is_owner=True))
+    db_session.commit()
+    _fill_cart(db_session, menu)
+    tap(db_session, cb_codec.build("cok"))
+    tap(db_session, cb_codec.build("ckdel", "pickup"))
+    out = svc.handle_update(db_session, _cb(CHAT, cb_codec.build("ckok")))
+    notes = [r for r in out if r.chat_id == 777001]
+    assert len(notes) == 1
+    assert "طلب جديد" in notes[0].text and "مفروم احمر" in notes[0].text
+    assert "استلام" in notes[0].text
+    assert "جاري التنفيذ" in out[0].text

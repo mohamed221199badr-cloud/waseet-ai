@@ -311,7 +311,17 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
 
 
 def handle_update(db: Session, update: dict) -> list[Reply]:
-    """Process one Telegram update. Commits on success; the caller sends the replies."""
+    """Process one Telegram update. Commits on success; the caller sends the replies.
+    A confirmed order also queues a message to the owner/cashier chats (checkout
+    _finalize puts it in db.info); it is sent after the customer's own reply."""
+    db.info.pop("order_notify", None)
+    replies = _handle_update(db, update)
+    for chat_id, text in db.info.pop("order_notify", []):
+        replies.append(Reply(chat_id, text))
+    return replies
+
+
+def _handle_update(db: Session, update: dict) -> list[Reply]:
     update_id = update.get("update_id") if isinstance(update, dict) else None
     cq = update.get("callback_query") if isinstance(update, dict) else None
     if isinstance(cq, dict) and isinstance(update_id, int):
