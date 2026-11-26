@@ -277,10 +277,10 @@ def test_start_shows_main_menu_directly(db_session, linked, menu):  # noqa: F811
     assert "🔍 بحث" in labels and "🛒 السلة" in labels
     assert "📋 عرض المنيو" not in labels
     assert "📍 العنوان" in labels and "📞 تواصل معنا" in labels
-    assert rep.photo_file_id is None and "🖼 رفع صورة الترحيب" not in labels  # customer
+    assert rep.photo_file_id is None and "🖼 رفع صورة المنيو" not in labels  # customer
 
 
-def test_start_with_welcome_photo_is_one_photo_message(db_session, linked, menu):  # noqa: F811
+def test_start_is_text_and_meat_button_opens_brochure_photo(db_session, linked, menu):  # noqa: F811
     biz = db_session.scalar(select(Business))
     biz.menu_photo_file_id = "brochure-id"
     db_session.commit()
@@ -290,8 +290,10 @@ def test_start_with_welcome_photo_is_one_photo_message(db_session, linked, menu)
                     "chat": {"id": CHAT, "type": "private"},
                     "from": {"id": CHAT, "is_bot": False}}})
     rep = out[0]
-    assert rep.photo_file_id == "brochure-id" and "أهلاً وسهلاً" in rep.text
-    assert any("اللحوم" in lbl for lbl in _flat(rep.button_rows))
+    assert rep.photo_file_id is None and "أهلاً وسهلاً" in rep.text  # /start = text only
+    cats = tap(db_session, cb_codec.build("cats"))
+    assert cats.photo_file_id == "brochure-id"
+    assert any("اللحوم" in lbl for lbl in _flat(cats.button_rows))
 
 
 def test_address_and_contact_buttons_are_separate(db_session, linked, menu):  # noqa: F811
@@ -309,7 +311,7 @@ def test_owner_sees_upload_button_only_without_photo(db_session, linked, menu): 
         "message": {"message_id": 1, "text": "/start",
                     "chat": {"id": CHAT, "type": "private"},
                     "from": {"id": CHAT, "is_bot": False}}})
-    assert "🖼 رفع صورة الترحيب" in _flat(out[0].button_rows)
+    assert "🖼 رفع صورة المنيو" in _flat(out[0].button_rows)
 
 
 def _make_owner(db, chat_id):

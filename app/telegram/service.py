@@ -261,8 +261,7 @@ def _handle_callback(db: Session, cq: dict) -> tuple[int | None, str | None, Rep
             # first contact is a tap: the main menu, fresh message either way
             text, rows = menu_buttons.main_menu(db, link)
             rep = Reply(chat_id, text, answer_callback_id=cq.get("id"),
-                        store_msg_id=True,
-                        photo_file_id=menu_buttons.main_menu_photo(db, link))
+                        store_msg_id=True)
             rep.button_rows = rows
             return chat_id, None, rep
     parsed = cb_codec.parse(data)
@@ -423,8 +422,7 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
             # no onboarding gate (checkout spec 2026-11-26): the main menu directly
             text_out, rows = menu_buttons.main_menu(db, link)
             db.commit()
-            rep = Reply(chat_id, text_out, store_msg_id=True,
-                        photo_file_id=menu_buttons.main_menu_photo(db, link))
+            rep = Reply(chat_id, text_out, store_msg_id=True)
             rep.button_rows = rows
             return [rep]
         else:
@@ -449,8 +447,7 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         if link is not None and _fresh_auto_link:
             text_out, rows = menu_buttons.main_menu(db, link)
             db.commit()
-            rep = Reply(chat_id, text_out, store_msg_id=True,
-                        photo_file_id=menu_buttons.main_menu_photo(db, link))
+            rep = Reply(chat_id, text_out, store_msg_id=True)
             rep.button_rows = rows
             return [rep]
         if menu_catalog.has_menu(db, link.business_id):

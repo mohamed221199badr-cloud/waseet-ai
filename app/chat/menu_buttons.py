@@ -600,14 +600,14 @@ def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str
         rows.append([("🥟 منيو الفطائر", callbacks.build("cat", PASTRY_CATEGORY, "p0"))])
     rows.append([("🛒 السلة", callbacks.build("cart"))])
     rows.append([("🔍 بحث", callbacks.build("srch"))])
-    # the brochure photo replaces the old «عرض المنيو» button (WhatsApp 9:39);
+    # the brochure photo opens from «منيو اللحوم» (WhatsApp 9:50), not on /start;
     # contact is split into two small buttons: address and phones
     rows.append([("📍 العنوان", callbacks.build("addr")),
                  ("📞 تواصل معنا", callbacks.build("contact"))])
     business = db.get(Business, link.business_id)
     if link.is_owner and not (business and business.menu_photo_file_id):
         # owner-only path to set the welcome photo (customers never see it)
-        rows.append([("🖼 رفع صورة الترحيب", callbacks.build("showmenu"))])
+        rows.append([("🖼 رفع صورة المنيو", callbacks.build("showmenu"))])
     return MSG_WELCOME, rows
 
 
@@ -661,6 +661,12 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         # post-order "finish" button: a friendly close, keeps the new-order option
         return MSG_FINISHED, [[("🛒 طلب جديد", callbacks.build("cats"))]], None
     text, rows = _navigate(db, link, cb, msg_id)
+    if cb.action == "cats" and text == MSG_CATS:
+        # «منيو اللحوم»: the brochure photo (official menu image) with the category
+        # buttons under it (WhatsApp 9:50)
+        photo = main_menu_photo(db, link)
+        if photo:
+            return text, rows, photo
     if cb.action == "cat" and text == f"أصناف «{cb.args[0]}»:":
         # a category with an owner-uploaded page photo (m014) opens as one photo
         # message: the photo, the items header as caption, the buttons under it
