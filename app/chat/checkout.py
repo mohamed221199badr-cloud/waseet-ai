@@ -31,6 +31,7 @@ from app.chat import callbacks, cashier_actions, menu_agent, menu_buttons, onboa
 from app.config import settings
 from app.matching.normalize import normalize
 from app.models_orders import Customer, OrderException, TelegramLink
+from app.notify import whatsapp_cloud
 
 MSG_PHONE = "محتاجين رقمك عشان نأكد الطلب."
 BTN_SHARE_CONTACT = "📱 مشاركة رقم الموبايل"
@@ -297,6 +298,11 @@ def _queue_cashier_notice(db: Session, link: TelegramLink, customer, order,
         TelegramLink.is_owner.is_(True))).all()
     chat_ids = list(dict.fromkeys(
         [o.chat_id for o in owners] + settings.cashier_telegram_chats))
+    if whatsapp_cloud.enabled():
+        one_line = " ، ".join(ln.strip() for ln in body.splitlines() if ln.strip())
+        params = [str(order.id)[:8], customer.name, one_line, _METHOD_LABEL[method]]
+        db.info.setdefault("order_notify_wa", []).extend(
+            (num, params) for num in settings.cashier_whatsapp_list)
     if not buttons:
         text = text.replace("🔔 طلب جديد رقم", "🔔 طلب جديد (متأكد تلقائياً ✅) رقم", 1)
     if buttons:

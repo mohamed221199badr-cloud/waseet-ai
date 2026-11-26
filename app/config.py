@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # WhatsApp sending needs a Cloud API sender (not built yet); the list is read here.
     cashier_telegram_chat_ids: str = ""
     cashier_whatsapp_numbers: str = ""
+    # Meta WhatsApp Cloud API (secrets: Railway env only). Off until both are set.
+    whatsapp_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_template_name: str = "order_notice"
+    whatsapp_template_lang: str = "ar"
+    whatsapp_api_version: str = "v21.0"
     # ORDER_AUTO_CONFIRM=false brings back the cashier ✅/❌ step (and its reminders)
     order_auto_confirm: bool = True
     kitchen_telegram_chat_ids: str = ""    # confirmed orders: items only
