@@ -533,8 +533,8 @@ def _handle(db: Session, link: TelegramLink, text: str, prior: list) -> str:
 # match simply gets no category buttons. Phase 2 menu tables replace this mapping.
 _TRIAL_CATEGORY_PREFIXES: dict[str, str] = {
     "MEAT": "🥩 اللحوم",
-    "PREP": "🥓 مصنعات وقطعات",
-    "LAMB": "🐑 الغازي والحلويات",
+    "PREP": "🥓 مصنعات وقطعيات",
+    "LAMB": "🐑 الضاني والحلويات",
     "BRGR": "🍔 برجر ميكس",
     "CHK": "🐔 الفراخ",
     "SVC": "🛠️ خدمات التصنيع",

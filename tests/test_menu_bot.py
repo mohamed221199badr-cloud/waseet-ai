@@ -59,11 +59,11 @@ def _add_item(db, biz, category, name, variants, sold_by="unit", unit_label=None
 @pytest.fixture()
 def menu(db_session, shop):  # noqa: F811
     biz = shop["ids"]["a"]
-    _add_category(db_session, biz, "مصنعات وقطعات", 1)
+    _add_category(db_session, biz, "مصنعات وقطعيات", 1)
     _add_category(db_session, biz, "اللحوم", 0)
-    kofta, kofta_v = _add_item(db_session, biz, "مصنعات وقطعات", "كفتة حاتي",
+    kofta, kofta_v = _add_item(db_session, biz, "مصنعات وقطعيات", "كفتة حاتي",
                                [("عادي", Decimal("420.00"), True)])
-    burger, burger_v = _add_item(db_session, biz, "مصنعات وقطعات", "برجر بلدي",
+    burger, burger_v = _add_item(db_session, biz, "مصنعات وقطعيات", "برجر بلدي",
                                  [("سعر 1", Decimal("280.00"), True),
                                   ("سعر 2", Decimal("350.00"), False),
                                   ("سعر 3", Decimal("450.00"), False)])
@@ -176,15 +176,15 @@ def test_weight_item_accepts_fraction(db_session, linked, menu):  # noqa: F811
 
 def test_catalog_lists_menu_categories(db_session, linked, menu):  # noqa: F811
     out = svc.handle_update(db_session, upd(500, "الأصناف"))
-    assert "اللحوم" in out[0].text and "مصنعات وقطعات" in out[0].text
+    assert "اللحوم" in out[0].text and "مصنعات وقطعيات" in out[0].text
     assert "كفتة حاتي" in out[0].text and "مفروم احمر" in out[0].text
 
 
 def test_tenant_isolation_menu(db_session, linked, shop, menu):  # noqa: F811
     # business b plants a same-named item at a different price: chat 500 (business a)
     # must only ever see its own menu
-    _add_category(db_session, shop["ids"]["b"], "مصنعات وقطعات", 1)
-    _add_item(db_session, shop["ids"]["b"], "مصنعات وقطعات", "كفتة حاتي",
+    _add_category(db_session, shop["ids"]["b"], "مصنعات وقطعيات", 1)
+    _add_item(db_session, shop["ids"]["b"], "مصنعات وقطعيات", "كفتة حاتي",
               [("عادي", Decimal("999.00"), True)])
     out = svc.handle_update(db_session, upd(500, "سعر كفتة حاتي"))
     assert "420" in out[0].text and "999" not in out[0].text
@@ -228,7 +228,7 @@ def test_same_name_two_categories_shows_category(db_session, linked, menu):  # n
     _add_item(db_session, menu["kofta"].business_id, "اللحوم", "كفتة حاتي",
               [("عادي", Decimal("400.00"), True)])
     out = svc.handle_update(db_session, upd(500, "٢ كفتة حاتي"))
-    assert "كفتة حاتي (مصنعات وقطعات)" in out[0].text
+    assert "كفتة حاتي (مصنعات وقطعيات)" in out[0].text
     assert "كفتة حاتي (اللحوم)" in out[0].text
     out = svc.handle_update(db_session, upd(500, "1"))
     assert "2 × كفتة حاتي = 840.00" in out[0].text

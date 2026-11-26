@@ -47,7 +47,7 @@ def test_two_marked_defaults_rejected_and_weight_needs_label(client, two_busines
 def test_same_name_lives_in_two_categories(client, two_businesses):
     h = auth_headers(two_businesses["a"])
     assert _item(client, h, name="كبدة ضاني", aliases=[]).status_code == 201
-    r = _item(client, h, name="كبدة ضاني", category="الغازي والحلويات", aliases=[])
+    r = _item(client, h, name="كبدة ضاني", category="الضاني والحلويات", aliases=[])
     assert r.status_code == 201
     # the same (category, name) twice in one business is a conflict
     assert _item(client, h, name="كبدة ضاني", aliases=[]).status_code == 409
