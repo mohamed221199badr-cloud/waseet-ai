@@ -238,7 +238,8 @@ def chat_page(customers, products) -> None:
     cid = by_name[picked]
     key = f"chat-{cid}"
     if key not in st.session_state:
-        st.session_state[key] = [("bot", "أهلاً! ابعت طلبك، مثال: ٣ سكر وكرتونتين زيت")]
+        st.session_state[key] = [
+            ("bot", "أهلاً! ابعت طلبك، مثال: كيلو مفروم حواوشي ونص كيلو كفتة حاتي")]
     if st.button("محادثة جديدة"):
         c.chat_reset(cid)
         st.session_state.pop(key, None)
