@@ -405,3 +405,27 @@ def _start_upd():
             "message": {"message_id": 1, "text": "/start",
                         "chat": {"id": CHAT, "type": "private"},
                         "from": {"id": CHAT, "is_bot": False}}}
+
+
+def test_back_buttons_cats_and_pastry_return_to_welcome(db_session, linked, menu):  # noqa: F811
+    biz = db_session.scalar(select(Business))
+    db_session.add(MenuCategory(business_id=biz.id, name="الفطائر", sort_order=9))
+    db_session.flush()
+    item = MenuItem(business_id=biz.id, category="الفطائر", name="فطيرة تجربة",
+                    sold_by="unit", sort_order=0)
+    db_session.add(item)
+    db_session.flush()
+    db_session.add(MenuItemVariant(business_id=biz.id, item_id=item.id, name="M",
+                                   price=Decimal("100"), is_default=True, sort_order=0))
+    db_session.commit()
+    home = cb_codec.build("home")
+    cats = tap(db_session, cb_codec.build("cats"))
+    assert home in _datas(cats.button_rows)
+    assert not any("الفطائر" in lbl for lbl in _flat(cats.button_rows))  # own button
+    past = tap(db_session, cb_codec.build("cat", "الفطائر", "p0"))
+    assert home in _datas(past.button_rows)
+    assert cb_codec.build("cats") not in _datas(past.button_rows)
+    meat = tap(db_session, cb_codec.build("cat", "اللحوم", "p0"))
+    assert cb_codec.build("cats") in _datas(meat.button_rows)  # meat items go back to meat menu
+    rep = tap(db_session, home)
+    assert "🥟 منيو الفطائر" in _flat(rep.button_rows)
