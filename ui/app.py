@@ -260,7 +260,7 @@ def main() -> None:
     me = st.session_state.me
     st.sidebar.write(f"**{me['business_name']}**\n\n{me['email']}")
     page = st.sidebar.radio(
-        "الصفحة", ["المسودات", "في انتظار الاعتماد", "السجل", "تيليجرام", "جرّب البوت",
+        "الصفحة", ["المسودات", "تيليجرام", "جرّب البوت",
                    "المنيو", "الموظفون"])
     if st.sidebar.button("خروج"):
         st.session_state.clear()

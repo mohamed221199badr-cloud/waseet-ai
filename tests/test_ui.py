@@ -109,11 +109,12 @@ def test_screen_dismiss_then_submit_then_confirm(client, shop, monkeypatch):  # 
     assert not submit.disabled
     submit.click()
     at.run()
-    at.sidebar.radio[0].set_value("في انتظار الاعتماد").run()
     assert not at.exception, at.exception
-    [b for b in at.button if b.label == "اعتماد"][0].click()
-    at.run()
-    assert not at.exception, at.exception
+    # the "في انتظار الاعتماد" screen is hidden from the sidebar menu (his call, 19124551);
+    # the confirm step itself is exercised through the API
+    h = shop["h"]
+    r = client.post(f"/api/v1/orders/{order['id']}/confirm", headers=h)
+    assert r.status_code == 200
     h = shop["h"]
     assert client.get(f"/api/v1/orders/{order['id']}", headers=h).json()["status"] == "confirmed"
     stock = client.get(f"/api/v1/products/{shop['p']['SU']['id']}", headers=h).json()
