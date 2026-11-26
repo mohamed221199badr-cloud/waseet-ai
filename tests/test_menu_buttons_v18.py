@@ -34,6 +34,13 @@ def _agent_on(monkeypatch):
 @pytest.fixture()
 def linked(client, db_session, shop):  # noqa: F811
     say(db_session, CHAT, f"/start {issue(client, shop)}")
+    # onboarding (spec 19758722 F2) gates menu flows on a complete profile; the shop
+    # customer has a phone, so pickup completes it and the flow tests stay ungated
+    from app.models_orders import Customer
+    cust = db_session.scalar(
+        select(Customer).where(Customer.business_id == shop["ids"]["a"]))
+    cust.delivery_method = "pickup"
+    db_session.commit()
     return shop
 
 

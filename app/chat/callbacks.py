@@ -15,6 +15,7 @@ Actions:
     npdot                     numpad decimal point (weight items only)
     npb                       numpad backspace
     npc                       numpad confirm
+    dv:<delivery|pickup>      onboarding: delivery vs pickup choice
     cart                      cart review message
     cadd                      add another item (back to categories, keep draft)
     cok                       confirm the order (same as «تمام»)
@@ -61,6 +62,8 @@ def parse(data: str) -> Callback | None:
         return None
     if action == "npd" and (len(args[0]) != 1 or not args[0].isdigit()):
         return None
+    if action == "dv" and args[0] not in ("delivery", "pickup"):
+        return None
     if action in ("it",) and not _is_uuid(args[0]):
         return None
     if action in ("var",) and not _is_uuid(args[0]):
@@ -70,7 +73,7 @@ def parse(data: str) -> Callback | None:
 
 _ARITY = {
     "cats": 0, "cat": 2, "it": 1, "var": 1,
-    "npd": 1, "npdot": 0, "npb": 0, "npc": 0,
+    "npd": 1, "npdot": 0, "npb": 0, "npc": 0, "dv": 1,
     "cart": 0, "cadd": 0, "cok": 0, "cclr": 0, "cclr_yes": 0, "cclr_no": 0,
     "ccancel": 0, "noop": 0, "showmenu": 0, "contact": 0,
 }
