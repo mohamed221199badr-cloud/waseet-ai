@@ -45,7 +45,12 @@ FINISH = {normalize(w) for w in ("تمام", "تم", "إنهاء", "انهاء",
                                        "انهاء الطلب", "خلصت", "تمام خلصت", "خلاص",
                                        "تأكيد", "تاكيد", "اكد", "أكد", "ok", "اوك")}
 
-_CONTACT_KEYBOARD = [[{"text": BTN_SHARE_CONTACT, "request_contact": True}]]
+BTN_BACK_TEXT = "🔙 رجوع"
+# a reply keyboard cannot carry inline buttons: the back button is a keyboard button whose
+# text handle_text maps back to the cart
+_CONTACT_KEYBOARD = [[{"text": BTN_SHARE_CONTACT, "request_contact": True}],
+                     [{"text": BTN_BACK_TEXT}]]
+_BACK_CART_ROWS = [[("🔙 رجوع", callbacks.build("cart"))]]
 _METHOD_LABEL = {"delivery": "دليفري 🛵", "pickup": "استلام من المحل 🏪"}
 
 CALLBACK_ACTIONS = ("cok", "ckdel", "ckaddr", "ckok", "ckno")
@@ -126,7 +131,7 @@ def _after_method(db: Session, link: TelegramLink, ui: dict, lines: list[dict],
                             [("🔙 رجوع", callbacks.build("cart"))]],
                      remove_keyboard=True, edit_id=edit_id)
     ui["checkout_step"] = "awaiting_address"
-    return _spec(MSG_ADDRESS_ASK, remove_keyboard=True, edit_id=edit_id)
+    return _spec(MSG_ADDRESS_ASK, rows=_BACK_CART_ROWS, remove_keyboard=True, edit_id=edit_id)
 
 
 def begin(db: Session, link: TelegramLink, edit_id=None) -> dict:
@@ -169,7 +174,8 @@ def current_spec(db: Session, link: TelegramLink) -> dict:
                             [("🔙 رجوع", callbacks.build("cart"))]],
                      remove_keyboard=True, edit_id=ui.get("msg_id"))
     if step == "awaiting_address":
-        return _spec(MSG_ADDRESS_ASK, remove_keyboard=True, edit_id=ui.get("msg_id"))
+        return _spec(MSG_ADDRESS_ASK, rows=_BACK_CART_ROWS, remove_keyboard=True,
+                     edit_id=ui.get("msg_id"))
     if step == "awaiting_final_confirm":
         return _summary_spec(db, link, ui, lines, ui.get("msg_id"))
     # nothing open: fall back to the cart
@@ -242,7 +248,8 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         else:
             ui.pop("temp_address", None)
             ui["checkout_step"] = "awaiting_address"
-            spec = _spec(MSG_ADDRESS_ASK, remove_keyboard=True, edit_id=msg_id)
+            spec = _spec(MSG_ADDRESS_ASK, rows=_BACK_CART_ROWS, remove_keyboard=True,
+                         edit_id=msg_id)
         menu_buttons._save(db, session, ui)
         return spec
 
@@ -332,6 +339,9 @@ def handle_text(db: Session, link: TelegramLink, text: str) -> dict:
     if not step:
         return _cart_spec(db, link, ui, lines)
 
+    if text.strip() == BTN_BACK_TEXT:  # the reply-keyboard back button: back to the cart
+        return _cart_spec(db, link, ui, lines)
+
     if legacy._is(text, legacy.CANCEL):
         # cancel checkout only; the cart stays
         return _cart_spec(db, link, ui, lines)
@@ -348,7 +358,7 @@ def handle_text(db: Session, link: TelegramLink, text: str) -> dict:
     if step == "awaiting_address":
         address = text.strip()
         if len(address) < 5:
-            return _spec(MSG_ADDRESS_BAD, edit_id=ui.get("msg_id"))
+            return _spec(MSG_ADDRESS_BAD, rows=_BACK_CART_ROWS, edit_id=ui.get("msg_id"))
         ui["temp_address"] = address[:500]
         spec = _summary_spec(db, link, ui, lines, edit_id=ui.get("msg_id"))
         menu_buttons._save(db, session, ui)

@@ -92,7 +92,7 @@ def test_first_message_auto_links_and_welcomes(db_session, menu):  # noqa: F811
     # no onboarding gate (checkout spec 2026-11-26): the main menu directly
     assert "أهلاً وسهلاً" in out[0].text
     labels = [lbl for row in out[0].button_rows for lbl, _ in row]
-    assert "🔍 بحث" in labels and "🛒 السلة" in labels
+    assert "🔍 بحث" not in labels and "🛒 السلة" in labels
     link = _link(db_session, CHAT)
     assert link is not None and link.business_id == menu["ids"]["a"]
     cust = db_session.get(Customer, link.customer_id)

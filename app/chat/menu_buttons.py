@@ -422,6 +422,8 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         return _qty_prompt(item, current), _numpad_rows(item, item_id)
 
     if cb.action == "cart":
+        for key in ("checkout_step", "temp_delivery_type", "temp_address"):
+            ui.pop(key, None)  # 🔙 from a checkout screen leaves checkout for good
         ui.update(screen="cart")
         _save(db, session, ui)
         if not _ok_lines(lines):
@@ -433,7 +435,8 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
         _save(db, session, ui)
         return ("متأكد إنك عايز تفضي السلة؟",
                 [[("نعم، افضيها", callbacks.build("cclr_yes"))],
-                 [("لا، ارجع للسلة", callbacks.build("cclr_no"))]])
+                 [("لا، ارجع للسلة", callbacks.build("cclr_no"))],
+                 [("🔙 رجوع", callbacks.build("cclr_no"))]])
 
     if cb.action == "cclr_yes":
         lines[:] = [ln for ln in lines if ln.get("status") != "ok"]
@@ -448,7 +451,9 @@ def _navigate(db: Session, link: TelegramLink, cb: callbacks.Callback,
 
     if cb.action == "ccancel":
         reply = menu_agent.handle_message(db, link, "الغي")
-        return reply.text, [[("🛒 طلب جديد", callbacks.build("cats"))]]
+        # handle_message returns the reply text (a str); the old `.text` crashed this tap
+        return reply, [[("🛒 طلب جديد", callbacks.build("cats"))],
+                       [("🔙 رجوع", callbacks.build("home"))]]
 
     return stale()
 
@@ -616,7 +621,6 @@ def main_menu(db: Session, link: TelegramLink) -> tuple[str, list[list[tuple[str
     if any(c.name == PASTRY_CATEGORY for c in list_categories(db, link.business_id)):
         rows.append([("🥟 منيو الفطائر", callbacks.build("cat", PASTRY_CATEGORY, "p0"))])
     rows.append([("🛒 السلة", callbacks.build("cart"))])
-    rows.append([("🔍 بحث", callbacks.build("srch"))])
     # the brochure photo opens from «منيو اللحوم» (WhatsApp 9:50), not on /start;
     # contact is split into two small buttons: address and phones
     rows.append([("📍 العنوان", callbacks.build("addr")),
