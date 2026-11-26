@@ -17,7 +17,7 @@ def test_concurrent_confirm_does_not_oversell(engine, db_session, two_businesses
     db_session.flush()
     order_ids = []
     for _ in range(2):  # stock is 5; each order wants 4
-        o = Order(business_id=ids["a"], customer_id=cust.id, status="pending")
+        o = Order(business_id=ids["a"], customer_id=cust.id, status="awaiting_confirmation")
         db_session.add(o)
         db_session.flush()
         db_session.add(OrderItem(

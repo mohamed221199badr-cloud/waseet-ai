@@ -144,7 +144,7 @@ def submit_order(
         raise HTTPException(status_code=409, detail=str(exc)) from None
     write_audit(
         db, business_id=business.id, entity="order", entity_id=str(order.id), action="update",
-        payload={"status": "pending", "total": str(order.total)},
+        payload={"status": "awaiting_confirmation", "total": str(order.total)},
     )
     db.commit()
     db.refresh(order)

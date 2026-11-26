@@ -19,7 +19,7 @@ REASONS = {
     "unclear_quantity": "الكمية مش واضحة",
     "duplicate_product": "نفس المنتج مذكور مرتين",
 }
-STATUS_AR = {"draft": "مسودة", "pending": "في انتظار الاعتماد",
+STATUS_AR = {"draft": "مسودة", "awaiting_confirmation": "في انتظار الاعتماد",
              "confirmed": "معتمد", "rejected": "مرفوض"}
 CHANNEL_AR = {"whatsapp": "واتساب", "telegram": "تليجرام", "manual": "يدوي"}
 
@@ -162,7 +162,7 @@ def drafts_page(customers, products) -> None:
 
 def pending_page(customers, products) -> None:
     c = client()
-    orders = c.orders("pending")
+    orders = c.orders("awaiting_confirmation")
     st.subheader(f"في انتظار الاعتماد ({len(orders)})")
     if not orders:
         st.info("مفيش طلبات في الانتظار.")

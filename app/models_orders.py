@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Numeric,
     String,
     Text,
@@ -24,7 +25,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
-ORDER_STATUSES = ("draft", "pending", "confirmed", "rejected")
+ORDER_STATUSES = ("draft", "awaiting_confirmation", "confirmed", "rejected", "cancelled",
+                  "preparing", "ready", "out_for_delivery", "delivered", "failed_delivery")
+PAYMENT_STATUSES = ("pending", "collected", "refunded")
+HISTORY_ACTOR_TYPES = ("user", "system", "customer")
 ORDER_CHANNELS = ("manual", "whatsapp", "telegram", "web")
 MOVEMENT_REASONS = ("restock", "adjustment", "order_confirmed")
 
@@ -108,7 +112,13 @@ class Order(Base):
     __table_args__ = (
         UniqueConstraint("business_id", "id", name="uq_orders_business_id"),
         CheckConstraint(
-            "status in ('draft','pending','confirmed','rejected')", name="ck_orders_status"
+            "status in ('draft','awaiting_confirmation','confirmed','rejected','cancelled',"
+            "'preparing','ready','out_for_delivery','delivered','failed_delivery')",
+            name="ck_orders_status",
+        ),
+        CheckConstraint(
+            "payment_status in ('pending','collected','refunded')",
+            name="ck_orders_payment_status",
         ),
         CheckConstraint(
             "channel in ('manual','whatsapp','telegram','web')", name="ck_orders_channel"
@@ -125,13 +135,20 @@ class Order(Base):
         UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), index=True
     )
     customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     # Channel-independent intake: where the order text came from, never how it is processed.
     channel: Mapped[str] = mapped_column(String(20), default="manual")
     source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    # B6: the delivery/payment half of the flow
+    delivery_attempts: Mapped[int] = mapped_column(default=0)
+    payment_status: Mapped[str] = mapped_column(String(20), default="pending")
+    confirmed_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    requires_reconfirmation: Mapped[bool] = mapped_column(default=False)
+    assigned_driver_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", name="fk_order_driver"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -146,6 +163,10 @@ class Order(Base):
     )
     exceptions: Mapped[list["OrderException"]] = relationship(
         back_populates="order", order_by="OrderException.created_at", lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+    status_history: Mapped[list["OrderStatusHistory"]] = relationship(
+        back_populates="order", order_by="OrderStatusHistory.created_at", lazy="selectin",
         cascade="all, delete-orphan",
     )
 
@@ -383,3 +404,37 @@ class ChatSession(Base):
     state: Mapped[str] = mapped_column(String(20), default="collecting")
     draft: Mapped[dict] = mapped_column(JSONB, default=dict)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class OrderStatusHistory(Base):
+    """Every order transition, with actor attribution (C2): 'user'/'system' rows name
+    the actor, 'customer' rows are attributed through orders.customer_id."""
+
+    __tablename__ = "order_status_history"
+    __table_args__ = (
+        CheckConstraint("actor_type in ('user','system','customer')",
+                        name="ck_osh_actor_type"),
+        CheckConstraint("actor_type = 'customer' or actor_id is not null",
+                        name="ck_osh_named_actor"),
+        CheckConstraint("actor_type <> 'customer' or actor_id is null",
+                        name="ck_osh_customer_unattributed"),
+        ForeignKeyConstraint(
+            ["business_id", "order_id"], ["orders.business_id", "orders.id"],
+            ondelete="CASCADE", name="fk_osh_order_same_business",
+        ),
+        Index("ix_osh_order", "business_id", "order_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"))
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    from_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(30))
+    actor_type: Mapped[str] = mapped_column(String(10))
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", name="fk_osh_actor"), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    order: Mapped[Order] = relationship(back_populates="status_history")

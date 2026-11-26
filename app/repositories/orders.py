@@ -135,16 +135,17 @@ def submit(db: Session, order: Order) -> Order:
         raise OrderStateError("order has unresolved exceptions; resolve or dismiss them first")
     if not order.items:
         raise OrderStateError("cannot submit an empty order")
-    order.status = "pending"
+    order.status = "awaiting_confirmation"
     db.flush()
     return order
 
 
 def confirm(db: Session, order: Order) -> Order:
-    """pending -> confirmed. Locks products in id order (no deadlocks), deducts stock
+    """awaiting_confirmation -> confirmed. Locks products in id order (no deadlocks), deducts stock
     atomically; if any line lacks stock nothing changes."""
-    if order.status != "pending":
-        raise OrderStateError(f"order is {order.status}; only pending orders can be confirmed")
+    if order.status != "awaiting_confirmation":
+        raise OrderStateError(
+            f"order is {order.status}; only awaiting_confirmation orders can be confirmed")
     for item in sorted(order.items, key=lambda i: str(i.product_id)):
         product = inventory.lock_product(db, order.business_id, item.product_id)
         inventory.apply_delta(
@@ -157,8 +158,9 @@ def confirm(db: Session, order: Order) -> Order:
 
 
 def reject(db: Session, order: Order, reason: str | None) -> Order:
-    if order.status != "pending":
-        raise OrderStateError(f"order is {order.status}; only pending orders can be rejected")
+    if order.status != "awaiting_confirmation":
+        raise OrderStateError(
+            f"order is {order.status}; only awaiting_confirmation orders can be rejected")
     order.status = "rejected"
     order.rejection_reason = reason
     order.decided_at = datetime.now(timezone.utc)

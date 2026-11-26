@@ -130,7 +130,7 @@ def test_submit_blocked_until_exceptions_resolved_or_dismissed(client, shop):
     assert client.post(f"/api/v1/orders/{oid}/exceptions/{by_raw['4 بسكويت']['id']}/dismiss",
                        headers=h, json={"note": "مرة تانية"}).status_code == 409
     sub = client.post(f"/api/v1/orders/{oid}/submit", headers=h)
-    assert sub.status_code == 200 and sub.json()["status"] == "pending"
+    assert sub.status_code == 200 and sub.json()["status"] == "awaiting_confirmation"
     conf = client.post(f"/api/v1/orders/{oid}/confirm", headers=h)
     assert conf.status_code == 200
     stock = client.get(f"/api/v1/products/{p['SU']['id']}", headers=h).json()["stock_quantity"]

@@ -39,7 +39,7 @@ def test_client_full_flow(client, shop, api):  # noqa: F811
     assert ei.value.status == 409
     api.resolve(order["id"], amb["id"], shop["p"]["R5"]["id"])
     api.dismiss(order["id"], other["id"], "مش صنف")
-    assert api.submit(order["id"])["status"] == "pending"
+    assert api.submit(order["id"])["status"] == "awaiting_confirmation"
     assert api.confirm(order["id"])["status"] == "confirmed"
     assert api.orders("confirmed")[0]["id"] == order["id"]
 

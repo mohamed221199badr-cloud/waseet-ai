@@ -55,7 +55,7 @@ def test_full_lifecycle_confirm_deducts_stock(client, two_businesses):
     biz, pid = ids["a"], ids["product_a"]  # stock 5
     _, o = setup_order(client, ids, qty=3)
     r = client.post(f"/api/v1/orders/{o['id']}/submit", headers=H(biz))
-    assert r.json()["status"] == "pending"
+    assert r.json()["status"] == "awaiting_confirmation"
     # stock untouched until confirmation
     assert client.get(f"/api/v1/products/{pid}", headers=H(biz)).json()["stock_quantity"] == 5
     r = client.post(f"/api/v1/orders/{o['id']}/confirm", headers=H(biz))
@@ -73,7 +73,8 @@ def test_confirm_with_insufficient_stock_changes_nothing(client, two_businesses)
     client.post(f"/api/v1/orders/{o['id']}/submit", headers=H(biz))
     r = client.post(f"/api/v1/orders/{o['id']}/confirm", headers=H(biz))
     assert r.status_code == 409
-    assert client.get(f"/api/v1/orders/{o['id']}", headers=H(biz)).json()["status"] == "pending"
+    got = client.get(f"/api/v1/orders/{o['id']}", headers=H(biz))
+    assert got.json()["status"] == "awaiting_confirmation"
     assert client.get(f"/api/v1/products/{pid}", headers=H(biz)).json()["stock_quantity"] == 5
 
 
@@ -164,7 +165,7 @@ def test_list_filter_by_status(client, two_businesses):
     setup_order(client, ids)
     client.post(f"/api/v1/orders/{o['id']}/submit", headers=H(biz))
     assert len(client.get("/api/v1/orders", headers=H(biz)).json()) == 2
-    pend = client.get("/api/v1/orders?status=pending", headers=H(biz)).json()
+    pend = client.get("/api/v1/orders?status=awaiting_confirmation", headers=H(biz)).json()
     assert [x["id"] for x in pend] == [o["id"]]
 
 
@@ -178,7 +179,7 @@ def test_order_audit_trail(client, two_businesses, db_session):
         client.post(f"/api/v1/orders/{o['id']}/{step}", headers=H(biz))
     events = db_session.query(AuditEvent).filter_by(business_id=biz, entity="order").all()
     statuses = [e.payload.get("status") for e in events if e.action == "update"]
-    assert statuses == ["pending", "confirmed"]
+    assert statuses == ["awaiting_confirmation", "confirmed"]
     assert db_session.query(AuditEvent).filter_by(business_id=biz, entity="stock").count() == 0
 
 
