@@ -199,35 +199,6 @@ def history_page(customers, products) -> None:
                     st.caption(f"سبب الرفض: {o['rejection_reason']}")
 
 
-def telegram_page(customers, products) -> None:
-    c = client()
-    st.subheader("ربط عملاء تيليجرام")
-    st.caption("اختار العميل واعمل كود. العميل يبعته للبوت بالشكل: /start الكود. "
-               "الكود يشتغل مرة واحدة وينتهي بعد 24 ساعة.")
-    by_name = {f"{name} ({cid[:6]})": cid for cid, name in customers.items()}
-    picked = st.selectbox("العميل", list(by_name), index=None, placeholder="اختار عميل")
-    cid = by_name.get(picked)
-    if st.button("إنشاء كود", disabled=cid is None):
-        try:
-            st.session_state.last_code = c.new_link_code(cid)
-        except api_client.ApiError as exc:
-            show_error(exc)
-    if "last_code" in st.session_state:
-        lc = st.session_state.last_code
-        st.success("الكود اتعمل. ابعته للعميل، يشتغل مرة واحدة وينتهي بعد 24 ساعة.")
-        st.code(f"/start {lc['code']}", language=None)
-    st.divider()
-    for link in c.links():
-        a, b = st.columns([4, 1])
-        a.write(f"{link['customer_name']} | اتربط {link['created_at'][:10]}")
-        if b.button("فصل", key=f"u-{link['id']}"):
-            try:
-                c.revoke_link(link["id"])
-                st.rerun()
-            except api_client.ApiError as exc:
-                show_error(exc)
-
-
 def chat_page(customers, products) -> None:
     c = client()
     st.subheader("جرّب وكيل المحادثة (بدون تيليجرام)")
@@ -261,7 +232,7 @@ def main() -> None:
     me = st.session_state.me
     st.sidebar.write(f"**{me['business_name']}**\n\n{me['email']}")
     page = st.sidebar.radio(
-        "الصفحة", ["المسودات", "تيليجرام", "جرّب البوت",
+        "الصفحة", ["المسودات", "جرّب البوت",
                    "المنيو", "الموظفون"])
     if st.sidebar.button("خروج"):
         st.session_state.clear()
@@ -275,7 +246,7 @@ def main() -> None:
             return
         customers, products = lookups()
         {"المسودات": drafts_page, "في انتظار الاعتماد": pending_page,
-         "السجل": history_page, "تيليجرام": telegram_page,
+         "السجل": history_page,
          "جرّب البوت": chat_page}[page](customers, products)
     except api_client.ApiError as exc:
         show_error(exc)

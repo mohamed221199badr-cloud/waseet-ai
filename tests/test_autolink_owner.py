@@ -141,19 +141,12 @@ def test_two_menu_businesses_keep_the_old_message(db_session, menu):  # noqa: F8
     assert _link(db_session, CHAT) is None
 
 
-def test_start_code_repoints_auto_link_to_named_customer(db_session, client, menu):  # noqa: F811
+def test_start_with_old_code_is_just_the_welcome(db_session, client, menu):  # noqa: F811
     svc.handle_update(db_session, _text(CHAT, "اهلا"))
     auto_cust = _link(db_session, CHAT).customer_id
-    named = client.post("/api/v1/customers", headers=menu["h"],
-                        json={"name": "عميل بالاسم", "phone": "010999"}).json()
-    code = client.post("/api/v1/telegram/link-codes", headers=menu["h"],
-                       json={"customer_id": named["id"]}).json()["code"]
-    out = svc.handle_update(db_session, _text(CHAT, f"/start {code}"))
-    assert out[0].text == svc.MSG_LINKED
-    link = _link(db_session, CHAT)
-    assert str(link.customer_id) == named["id"] and link.customer_id != auto_cust
-    cust = db_session.get(Customer, link.customer_id)
-    assert cust.telegram_chat_id == CHAT  # a later /stop re-finds this customer
+    out = svc.handle_update(db_session, _text(CHAT, "/start TH5LTF4SWE"))
+    assert "تم ربط الحساب" not in out[0].text and "أهلاً وسهلاً" in out[0].text
+    assert _link(db_session, CHAT).customer_id == auto_cust  # nothing re-pointed
 
 
 def test_unlinked_callback_auto_links_with_welcome(db_session, menu):  # noqa: F811
