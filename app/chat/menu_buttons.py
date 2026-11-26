@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.audit import write_audit
 from app.chat import agent as legacy
 from app.chat import callbacks, menu_agent
 from app.chat.menu_catalog import (
@@ -31,6 +32,7 @@ from app.chat.menu_catalog import (
 )
 from app.matching.normalize import normalize_digits
 from app.models import Business
+from app.models_menu import MenuCategory
 from app.models_orders import ChatSession, TelegramLink
 
 PAGE_SIZE = 6
@@ -635,6 +637,12 @@ def handle_callback(db: Session, link: TelegramLink, cb: callbacks.Callback,
         _save(db, session, ui)
         return MSG_ASK_MENU_IMAGE, [], None
     text, rows = _navigate(db, link, cb, msg_id)
+    if cb.action == "cat" and text == f"أصناف «{cb.args[0]}»:":
+        # a category with an owner-uploaded page photo (m014) opens as one photo
+        # message: the photo, the items header as caption, the buttons under it
+        photo = _category_photo(db, link.business_id, cb.args[0])
+        if photo:
+            return text, rows, photo
     return text, rows, None
 
 
@@ -662,3 +670,36 @@ def handle_photo(db: Session, link: TelegramLink, file_id: str
     ui.update(await_menu_image=False, screen="cats")
     _save(db, session, ui)
     return MSG_MENU_IMAGE_SAVED, [[("🛒 ابدأ الطلب", callbacks.build("cats"))]]
+
+
+# ---------- per-category page photos (m014, WhatsApp spec 2026-11-26) ----------
+MSG_CATEGORY_PHOTO_SAVED = "تمام ✅ صورة قسم «{category}» اتحفظت. هتظهر لأي زبون يفتح القسم."
+MSG_CATEGORY_PHOTO_NONE = "مفيش قسم بالاسم ده. الأقسام المتاحة:\n{categories}"
+
+
+def _category_photo(db: Session, business_id, category: str) -> str | None:
+    """The stored page photo for one category, if the owner uploaded one."""
+    row = db.scalar(select(MenuCategory).where(
+        MenuCategory.business_id == business_id, MenuCategory.name == category))
+    return row.photo_file_id if row is not None else None
+
+
+def handle_category_photo(db: Session, link: TelegramLink, caption: str, file_id: str
+                          ) -> tuple[str, list[list[tuple[str, str]]]]:
+    """An owner photo whose caption is a category name: save it as that category's
+    page photo. Exact normalized name match only - never a fuzzy guess on his data.
+    Owner links only (19673006); the caller checks is_owner before calling."""
+    from app.matching.normalize import normalize
+    target = normalize(caption)
+    match = next((c for c in list_categories(db, link.business_id)
+                  if normalize(c.name) == target and target), None)
+    if match is None:
+        names = "\n".join(f"- {c.name}" for c in list_categories(db, link.business_id))
+        return MSG_CATEGORY_PHOTO_NONE.format(categories=names or "(لسه مفيش أقسام)"), []
+    match.photo_file_id = file_id[:200]
+    db.add(match)
+    write_audit(db, business_id=link.business_id, entity="menu_category",
+                entity_id=str(match.id), action="photo_set",
+                payload={"category": match.name, "by": "owner_chat",
+                         "chat_id": link.chat_id})
+    return MSG_CATEGORY_PHOTO_SAVED.format(category=match.name), []

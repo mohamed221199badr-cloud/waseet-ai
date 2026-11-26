@@ -365,26 +365,35 @@ def handle_update(db: Session, update: dict) -> list[Reply]:
         if isinstance(photos, list) and photos:
             link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chat_id))
             if (link is not None and settings.chat_agent_enabled
-                    and menu_catalog.has_menu(db, link.business_id)
-                    and menu_buttons.wants_photo(db, link)):
-                inserted = db.execute(
-                    pg_insert(TelegramUpdate).values(update_id=update_id)
-                    .on_conflict_do_nothing().returning(TelegramUpdate.update_id)
-                ).first()
-                if inserted is None:
-                    db.rollback()
-                    return []
+                    and menu_catalog.has_menu(db, link.business_id)):
                 biggest = max(photos, key=lambda p: (p.get("file_size") or 0,
                                                      p.get("width") or 0))
                 file_id = biggest.get("file_id")
                 if not isinstance(file_id, str) or not file_id:
                     return []
-                out, rows = menu_buttons.handle_photo(db, link, file_id)
-                db.commit()
-                rep = Reply(chat_id, out, store_msg_id=True)
-                if rows:
-                    rep.button_rows = rows
-                return [rep]
+                caption = (msg.get("caption") or "").strip()
+                # owner page-photo upload (m014): caption = the category name. The
+                # prompted menu-image flow wins when it is open.
+                owner_caption = (link.is_owner and caption
+                                 and not menu_buttons.wants_photo(db, link))
+                if menu_buttons.wants_photo(db, link) or owner_caption:
+                    inserted = db.execute(
+                        pg_insert(TelegramUpdate).values(update_id=update_id)
+                        .on_conflict_do_nothing().returning(TelegramUpdate.update_id)
+                    ).first()
+                    if inserted is None:
+                        db.rollback()
+                        return []
+                    if owner_caption:
+                        out, rows = menu_buttons.handle_category_photo(
+                            db, link, caption, file_id)
+                    else:
+                        out, rows = menu_buttons.handle_photo(db, link, file_id)
+                    db.commit()
+                    rep = Reply(chat_id, out, store_msg_id=True)
+                    if rows:
+                        rep.button_rows = rows
+                    return [rep]
         return []
     # Redelivered update: do nothing. Same transaction as the work, so a crash retries cleanly.
     inserted = db.execute(

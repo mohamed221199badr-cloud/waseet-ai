@@ -114,14 +114,21 @@ class TelegramClient:
             return True
         except TelegramError as exc:
             if "message is not modified" in str(exc) or "message can't be edited" in str(exc) \
-                    or "message to edit not found" in str(exc):
+                    or "message to edit not found" in str(exc) \
+                    or "no text in the message" in str(exc):
+                # also: the target is a photo message (per-category pages, m014),
+                # which has no editable text - the caller sends fresh instead
                 return False
             raise
 
     def send_photo(self, chat_id: int, file_id: str,
-                   button_rows: list[list[tuple[str, str]]] | None = None) -> int | None:
-        """Sends a photo by its Telegram file_id reference (no bytes stored by us)."""
+                   button_rows: list[list[tuple[str, str]]] | None = None,
+                   caption: str | None = None) -> int | None:
+        """Sends a photo by its Telegram file_id reference (no bytes stored by us).
+        The caption carries the screen's text (Telegram caps captions at 1024)."""
         params: dict = {"chat_id": chat_id, "photo": file_id}
+        if caption:
+            params["caption"] = caption[:1024]
         markup = self._markup(None, button_rows)
         if markup:
             params["reply_markup"] = markup
@@ -153,8 +160,18 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
                 if rep.answer_callback_id is not None:
                     client.answer_callback_query(rep.answer_callback_id)
                 if rep.photo_file_id:
-                    client.send_photo(rep.chat_id, rep.photo_file_id, rep.button_rows)
-                if rep.text:
+                    # photo screens (category pages, official menu): the text rides
+                    # as the caption, one message with the buttons under the photo
+                    mid = client.send_photo(rep.chat_id, rep.photo_file_id,
+                                            rep.button_rows, caption=rep.text or None)
+                    if rep.store_msg_id and mid is not None:
+                        db2 = session_factory()
+                        try:
+                            menu_buttons.set_msg_id(db2, rep.chat_id, mid)
+                            db2.commit()
+                        finally:
+                            db2.close()
+                elif rep.text:
                     mid = None
                     if rep.edit_message_id is not None:
                         edited = client.edit_message(
