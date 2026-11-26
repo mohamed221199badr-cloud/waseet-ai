@@ -140,10 +140,67 @@ class Order(Base):
         back_populates="order", order_by="OrderItem.created_at", lazy="selectin",
         cascade="all, delete-orphan",
     )
+    lines: Mapped[list["OrderLine"]] = relationship(
+        back_populates="order", order_by="OrderLine.created_at", lazy="selectin",
+        cascade="all, delete-orphan",
+    )
     exceptions: Mapped[list["OrderException"]] = relationship(
         back_populates="order", order_by="OrderException.created_at", lazy="selectin",
         cascade="all, delete-orphan",
     )
+
+
+class OrderLine(Base):
+    """Phase 2 (m009): one line of an order, priced from the restaurant menu.
+
+    Evolution of OrderItem: references a menu variant instead of a product and freezes
+    names, unit and price at order time. Quantity is fractional (weight-sold items).
+    Additive: OrderItem and everything reading it stay untouched until the cutover ends."""
+
+    __tablename__ = "order_lines"
+    __table_args__ = (
+        UniqueConstraint("order_id", "variant_id", name="uq_order_lines_order_variant"),
+        UniqueConstraint("business_id", "id", name="uq_order_lines_business_id"),
+        CheckConstraint("quantity > 0", name="ck_line_qty_positive"),
+        CheckConstraint(
+            "price_source in ('menu','override','cashier_manual')", name="ck_line_price_source"
+        ),
+        CheckConstraint(
+            "price_source = 'cashier_manual' or (priced_by is null and priced_at is null)",
+            name="ck_line_rule_price_unattributed",
+        ),
+        CheckConstraint(
+            "price_source <> 'cashier_manual' or (priced_by is not null and priced_at is not null)",
+            name="ck_line_manual_price_attributed",
+        ),
+        ForeignKeyConstraint(
+            ["business_id", "order_id"], ["orders.business_id", "orders.id"],
+            ondelete="CASCADE", name="fk_line_order_same_business",
+        ),
+        ForeignKeyConstraint(
+            ["business_id", "variant_id"],
+            ["menu_item_variants.business_id", "menu_item_variants.id"],
+            name="fk_line_variant_same_business",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    variant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    item_name: Mapped[str] = mapped_column(String(300))
+    variant_name: Mapped[str] = mapped_column(String(100))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(10, 3))
+    unit_label: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    price_source: Mapped[str] = mapped_column(String(20))  # menu|override|cashier_manual
+    priced_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    priced_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    order: Mapped[Order] = relationship(back_populates="lines")
 
 
 class OrderItem(Base):

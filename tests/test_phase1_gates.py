@@ -16,14 +16,16 @@ from tests.test_telegram import say
 
 REPO = Path(__file__).resolve().parent.parent
 
-# Modules the bot may never touch in Phase 1 (B2: the bot reads `products` only).
-FORBIDDEN_BOT_IMPORTS = ("app.models_menu", "app.repositories.menu",
+# Modules the bot may never touch even after the Phase 2 menu cutover:
+# owner-side services stay out of app/chat and app/llm. The bot does read
+# app.models_menu directly (that IS the cutover), via app/chat/menu_catalog.py.
+FORBIDDEN_BOT_IMPORTS = ("app.repositories.menu",
                          "app.menu_import", "app.price_service", "app.staff_service")
 
 
 def test_bot_import_boundary():
-    """Static boundary: app/chat and app/llm import nothing from the menu stack,
-    so the B2 boundary cannot erode silently."""
+    """Static boundary: app/chat and app/llm import nothing from the owner-side
+    menu services, so the boundary cannot erode silently."""
     offenders = []
     for pkg in ("app/chat", "app/llm"):
         for file in (REPO / pkg).rglob("*.py"):
