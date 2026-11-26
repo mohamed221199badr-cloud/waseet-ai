@@ -182,3 +182,47 @@ def test_tenant_isolation_menu(db_session, linked, shop, menu):  # noqa: F811
               [("عادي", Decimal("999.00"), True)])
     out = svc.handle_update(db_session, upd(500, "سعر كفتة حاتي"))
     assert "420" in out[0].text and "999" not in out[0].text
+
+
+def test_kilo_word_means_one_kilo(db_session, linked, menu):  # noqa: F811
+    out = svc.handle_update(db_session, upd(500, "كيلو مفروم احمر"))
+    assert "1 × مفروم احمر = 450.00" in out[0].text
+    svc.handle_update(db_session, upd(500, "تمام"))
+    lines = _lines(db_session, db_session.scalar(select(Order)))
+    assert lines[0].quantity == Decimal("1.000")
+
+
+def test_half_kilo_phrase(db_session, linked, menu):  # noqa: F811
+    out = svc.handle_update(db_session, upd(500, "نص كيلو مفروم احمر"))
+    assert "0.5 × مفروم احمر = 225.00" in out[0].text
+
+
+def test_bare_kilo_answers_qty_question(db_session, linked, menu):  # noqa: F811
+    svc.handle_update(db_session, upd(500, "مفروم احمر"))
+    out = svc.handle_update(db_session, upd(500, "كيلو"))
+    assert "1 × مفروم احمر = 450.00" in out[0].text
+
+
+def test_control_word_adds_no_line(db_session, linked, menu):  # noqa: F811
+    # a stray "تمام" while a quantity question is open must not become an order
+    # line (the fuzzy matcher offered التوماموك for تمام on the real menu)
+    from app.models_orders import ChatSession
+    svc.handle_update(db_session, upd(500, "مفروم احمر"))
+    out = svc.handle_update(db_session, upd(500, "تمام"))
+    assert "كام «مفروم احمر»" in out[0].text or "ما فهمتش الكمية" in out[0].text
+    s = db_session.scalar(select(ChatSession).where(ChatSession.chat_id == 500))
+    assert len(s.draft["lines"]) == 1
+    out = svc.handle_update(db_session, upd(500, "2"))
+    assert "2 × مفروم احمر = 900.00" in out[0].text
+
+
+def test_same_name_two_categories_shows_category(db_session, linked, menu):  # noqa: F811
+    # كفتة حاتي exists in two categories on the real menu: the choice list must
+    # say which is which, not show the same name twice
+    _add_item(db_session, menu["kofta"].business_id, "اللحوم", "كفتة حاتي",
+              [("عادي", Decimal("400.00"), True)])
+    out = svc.handle_update(db_session, upd(500, "٢ كفتة حاتي"))
+    assert "كفتة حاتي (مصنعات وقطعات)" in out[0].text
+    assert "كفتة حاتي (اللحوم)" in out[0].text
+    out = svc.handle_update(db_session, upd(500, "1"))
+    assert "2 × كفتة حاتي = 840.00" in out[0].text

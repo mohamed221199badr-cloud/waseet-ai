@@ -162,7 +162,15 @@ def _save_menu(db: Session, link: TelegramLink, session, state: str, lines: list
 
 
 # ---- text -> lines ---------------------------------------------------------------------
+_CONTROL_WORDS = (legacy.YES | legacy.NO | legacy.CANCEL | legacy.SKIP
+                  | legacy.GREET | legacy.THANKS | legacy.HELP_Q)
+
+
 def _lines_from_text(db: Session, link: TelegramLink, cat: Catalog, text: str) -> list[dict]:
+    # conversation control words ("تمام", "شكرا", "الغي", ...) are never order
+    # lines: the fuzzy matcher can offer junk candidates for them (تمام -> التوماموك)
+    if legacy._is(text, _CONTROL_WORDS):
+        return []
     out: list[dict] = []
     seen: set[str] = set()
     for r in cat.matcher.match_text(text):
@@ -178,18 +186,35 @@ def _lines_from_text(db: Session, link: TelegramLink, cat: Catalog, text: str) -
             line["reason"] = "duplicate_item"
         elif r.reason in ("missing_quantity", "unclear_quantity") and iid:
             line["item_id"] = iid
-            _route_matched(db, link, cat, line, qty_known=False)
+            _weight_qty_from_size(line, cat, r.raw)
+            _route_matched(db, link, cat, line, qty_known=bool(line["qty"]))
         elif r.reason in ("ambiguous", "low_confidence") and r.candidates:
             # the matcher can list the SAME item twice (name + alias hit): that is no
-            # ambiguity - dedupe, and a single survivor routes like a plain match
+            # ambiguity - dedupe, and a single survivor routes like a plain match.
+            # a low-confidence hit is always confirmed, never silently accepted
+            # ("توم" -> التوماموك is a guess, not a match).
             cands = list(dict.fromkeys(str(c.product_id) for c in r.candidates))
-            if len(cands) == 1:
+            if len(cands) == 1 and r.reason == "ambiguous":
                 line["item_id"] = cands[0]
-                _route_matched(db, link, cat, line, qty_known=False)
+                _weight_qty_from_size(line, cat, r.raw)
+                _route_matched(db, link, cat, line, qty_known=bool(line["qty"]))
             else:
                 line.update(candidates=cands, status="need_choice")
         out.append(line)
     return out
+
+
+def _weight_qty_from_size(line: dict, cat: Catalog, raw: str) -> None:
+    """"كيلو مفروم" / "نص كيلو مفروم": the parser reads the unit as a mass Size,
+    not a quantity. For weight items that IS the quantity (grams / 1000 = كيلو)."""
+    if line["qty"] or not line.get("item_id"):
+        return
+    item = cat.items.get(line["item_id"])
+    if item is None or item.sold_by != "weight":
+        return
+    parsed = parse_line(raw)
+    if parsed.size is not None and parsed.size.dimension == "mass":
+        line["qty"] = float(parsed.size.amount / 1000)  # JSONB-safe; re-decimalized later
 
 
 def _route_matched(db: Session, link: TelegramLink, cat: Catalog, line: dict,
@@ -247,6 +272,10 @@ def _apply_qty(line: dict, text: str, item: MenuItem | None = None) -> bool:
     if qty is None and item is not None and item.sold_by == "weight":
         # weight items accept fractions the int parser cannot: "2.5", "٢,٥", "نص", "2 ونص"
         words = [w for w in re.split(r"[\s،]+", t) if w and w not in _UNIT_WORDS]
+        # bare unit as the whole answer: "كيلو" to "كام؟" means 1 كيلو
+        if not words and any(w in ("كيلو", "كيلوجرام", "كيلوغرام")
+                             for w in re.split(r"[\s،]+", t)):
+            qty = 1.0
         total = Decimal("0")
         for w in words:
             w = w.replace("٫", ".").replace(",", ".")
@@ -353,6 +382,9 @@ def _next_question(db: Session, link: TelegramLink, cat: Catalog, lines: list[di
             return f"كام «{name}» عايز؟ اكتب الكمية بالرقم."
         if line["status"] == "need_choice":
             opts = [cat.items[p].name for p in line["candidates"] if p in cat.items]
+            if len(opts) != len(set(opts)):  # same name in two categories: disambiguate
+                opts = [f"{cat.items[p].name} ({cat.items[p].category})"
+                        for p in line["candidates"] if p in cat.items]
             if not opts:
                 line["status"] = "unresolved"
                 continue
@@ -381,6 +413,11 @@ def _advance(db, link, session, cat: Catalog, lines: list[dict]) -> str:
     return _confirmation(db, link, cat, lines)
 
 
+def _qty(q) -> str:
+    d = Decimal(str(q))
+    return str(int(d)) if d == d.to_integral_value() else str(q)
+
+
 def _confirmation(db: Session, link: TelegramLink, cat: Catalog, lines: list[dict]) -> str:
     ok = [ln for ln in lines if ln["status"] == "ok"]
     rest = [ln for ln in lines if ln["status"] != "ok"]
@@ -389,7 +426,7 @@ def _confirmation(db: Session, link: TelegramLink, cat: Catalog, lines: list[dic
     for ln in ok:
         price = Decimal(ln["unit_price"])
         qty = Decimal(str(ln["qty"]))
-        row = f"• {ln['qty']} × {_display_name(cat, ln)}"
+        row = f"• {_qty(ln['qty'])} × {_display_name(cat, ln)}"
         if settings.chat_show_prices:
             row += f" = {_money(price * qty)} (السعر {_money(price)})"
             total += price * qty
