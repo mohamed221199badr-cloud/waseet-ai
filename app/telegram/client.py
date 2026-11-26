@@ -13,7 +13,7 @@ import time
 
 import httpx
 
-from app.chat import menu_buttons
+from app.chat import menu_buttons, reminders
 from app.config import settings
 from app.db import SessionLocal
 from app.telegram.service import handle_update
@@ -196,6 +196,27 @@ def process_batch(client: TelegramClient, updates: list[dict], session_factory=S
     return offset
 
 
+def send_reminders(client: TelegramClient, session_factory=SessionLocal) -> int:
+    """Pending-order reminders (3 and 10 minutes). Never raises: the bot keeps polling."""
+    try:
+        db = session_factory()
+        try:
+            due_msgs = reminders.due(db)
+        finally:
+            db.close()
+    except Exception as exc:
+        log.error("reminders failed: %s", type(exc).__name__)
+        return 0
+    sent = 0
+    for chat_id, text, rows in due_msgs:
+        try:
+            client.send_message(chat_id, text, None, rows)
+            sent += 1
+        except TelegramError as exc:
+            log.error("reminder send failed: %s", exc)
+    return sent
+
+
 def run() -> None:
     logging.basicConfig(level=logging.INFO)
     client = TelegramClient(settings.telegram_bot_token)
@@ -210,6 +231,7 @@ def run() -> None:
             continue
         if updates:
             offset = process_batch(client, updates)
+        send_reminders(client)
 
 
 if __name__ == "__main__":

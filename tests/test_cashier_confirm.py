@@ -151,3 +151,39 @@ def test_reason_screen_has_back_to_the_notice_buttons(db_session, linked, menu):
     assert cb_codec.build("oky", order.id) in _datas(back[0].button_rows)
     db_session.refresh(order)
     assert order.status == "pending"
+
+
+def _age(db, order, minutes):
+    from sqlalchemy import text
+    db.execute(text(f"UPDATE orders SET created_at = now() - interval '{minutes} minutes' "
+                    "WHERE id = :i"), {"i": order.id})
+    db.commit()
+
+
+def test_pending_order_reminders_at_3_and_10_minutes_once_each(db_session, linked, menu):  # noqa: F811
+    from app.chat import reminders
+    _owner(db_session, linked["ids"]["a"])
+    order, _ = _place(db_session, menu)
+    assert reminders.due(db_session) == []                  # fresh: nothing yet
+    _age(db_session, order, 4)
+    first = reminders.due(db_session)
+    assert [c for c, _, _ in first] == [OWNER] and "لسه مستني" in first[0][1]
+    assert cb_codec.build("oky", order.id) in _datas(first[0][2])
+    assert reminders.due(db_session) == []                  # not repeated
+    _age(db_session, order, 11)
+    second = reminders.due(db_session)
+    assert len(second) == 1 and "10 دقايق" in second[0][1]
+    assert reminders.due(db_session) == []                  # nothing after the 2nd
+
+
+def test_no_reminder_once_decided_or_for_old_orders(db_session, linked, menu):  # noqa: F811
+    from app.chat import reminders
+    _owner(db_session, linked["ids"]["a"])
+    order, _ = _place(db_session, menu)
+    _tap(db_session, OWNER, cb_codec.build("oky", order.id))
+    _age(db_session, order, 11)
+    assert reminders.due(db_session) == []                  # confirmed
+    order.status = "pending"
+    db_session.commit()
+    _age(db_session, order, 45)
+    assert reminders.due(db_session) == []                  # older than the 30 min window
